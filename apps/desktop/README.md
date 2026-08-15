@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 The desktop app supervises the existing loopback Web Host and keeps it alive from the system tray when its window is closed.
 
+The application also ships an account page that obtains a DeepSeek API key from the platform and stores it as the model credential ([plugins/account](plugins/account/README.md)).
+
 ## Development
 
 Install dependencies, then use the single desktop development command. It builds the Host and client packages, Web frontend, and Electron main process before launching the application:

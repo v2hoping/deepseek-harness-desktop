@@ -4,6 +4,8 @@
 
 桌面应用监管既有的 loopback Web Host，窗口关闭后由系统托盘让它继续运行。
 
+应用还附带一个账户页，从平台获取 DeepSeek API Key 并存为模型凭据（见 [plugins/account](plugins/account/README.md)）。
+
 ## 开发
 
 安装依赖后使用唯一的桌面开发命令。它先构建 Host 与客户端包、Web 前端和 Electron 主进程，再启动应用：

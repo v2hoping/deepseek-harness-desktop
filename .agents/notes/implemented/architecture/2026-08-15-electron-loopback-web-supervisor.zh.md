@@ -22,7 +22,7 @@ Status: implemented
 
 macOS 与 Windows 使用同一份纳入版本管理的 `apps/desktop/build/icon.png` 输入，仓库侧不做转换。本地 `package:desktop` 的产物是未压缩且未签名的，因此不需要任何分发凭据。
 
-子进程仍是 Web profile 的 Cordis 树、会话、设置、凭据、文件系统与 shell 服务、HTTP/WebSocket 载体以及静默处置的唯一持有者。Electron 不把这些服务引入它的主进程或渲染进程。BrowserWindow 加载校验过的 loopback URL，禁用 Node 集成，启用上下文隔离与渲染进程沙箱，且不提供 preload 能力。这仍是既有的本地 Web 安全模型：桌面外壳不新增认证层或 IPC 授权层。
+子进程仍是 Web profile 的 Cordis 树、会话、设置、凭据、文件系统与 shell 服务、HTTP/WebSocket 载体以及静默处置的唯一持有者。Electron 不把这些服务引入它的主进程或渲染进程。BrowserWindow 加载校验过的 loopback URL，禁用 Node 集成，启用上下文隔离与渲染进程沙箱。它唯一的 preload 暴露桌面账户方法，不暴露任何裸 IPC 通道（见[账户 Key 获取](../feature/2026-08-15-desktop-account-key-provisioning.md)）。这仍是既有的本地 Web 安全模型：桌面外壳不新增认证层或 IPC 授权层。
 
 托盘与 Host 监管者持有应用生命周期，与 BrowserWindow 是否可见无关。用户关闭窗口的动作被拦截并隐藏窗口；它既不退出 Electron，也不向子进程发信号。托盘激活与 macOS 应用激活重新显示既有窗口。`window-all-closed` 不是退出请求。单实例锁阻止第二个桌面进程与第二个 Host 子进程；第二次启动只恢复并聚焦主窗口。
 
@@ -48,7 +48,7 @@ macOS 与 Windows 使用同一份纳入版本管理的 `apps/desktop/build/icon.
 
 ### Upstream upgrades
 
-这个 fork 跟进上游的成本就是它改动的九个既有文件，因此 `apps/desktop/scripts/upgrade-from-upstream.ts` 只自动化不含决策的部分。它合并上游 ref，通过重新生成解决 `pnpm-lock.yaml` 与 `THIRD_PARTY_NOTICES.md` 的冲突，并在其它任何冲突上停下，列出需要人处理的路径。随后它重装依赖、刷新生成物、运行桌面闭包检查并打包应用，因此一次完整跑通的运行已经证明该合并可构建。
+这个 fork 跟进上游的成本就是它改动的既有文件——仓库配置、四个发布与卫生脚本，以及一个引导扩展位——因此 `apps/desktop/scripts/upgrade-from-upstream.ts` 只自动化不含决策的部分。它合并上游 ref，通过重新生成解决 `pnpm-lock.yaml` 与 `THIRD_PARTY_NOTICES.md` 的冲突，并在其它任何冲突上停下，列出需要人处理的路径。随后它重装依赖、刷新生成物、运行桌面闭包检查并打包应用，因此一次完整跑通的运行已经证明该合并可构建。
 
 就绪行是唯一没有门禁观察的耦合：上游改变格式时合并干净、编译通过。启动本轮产出的打包应用才会让它暴露。
 

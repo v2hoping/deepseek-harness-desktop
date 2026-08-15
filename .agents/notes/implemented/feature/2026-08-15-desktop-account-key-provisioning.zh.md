@@ -32,7 +32,7 @@ Key 的获取发生在平台自己的页面上。`快速获得` 在绑定持久 
 
 用量、账单、充值与 Key 管理都是在同一会话 partition 中打开官方页面的链接。自绘它们需要本决策拒绝调用的内部端点。
 
-### 不触碰上游地进入产品
+### 如何进入产品
 
 该插件是外部插件（out-of-tree bundle）。`dsh plugin --profile web add file:<dir>` 把它装进 profile 目录，Loader 的裸说明符解析在那里能够找到它，而 CLI 会把任何声明了 `dsh.bundle.patch` 的包追加进 `dsh.profile.bundles`。`apps/desktop/src/account/ensure-plugin.ts` 在 Host 启动前执行这件事，并在 profile 清单已记录该依赖时跳过，因此普通启动不会拉起包管理器。该步骤失败时，Host 仍完全可用，只是没有账户页。
 

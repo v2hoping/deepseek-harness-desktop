@@ -32,7 +32,7 @@ The application does not verify the stored key. A freshly issued key is not acce
 
 Usage, billing, top up, and key management are links that open the official pages in the same session partition. Redrawing them would require the internal endpoints this decision refuses to call.
 
-### Reaching the product without touching upstream
+### Reaching the product
 
 The plugin is an out-of-tree bundle. `dsh plugin --profile web add file:<dir>` installs it into the profile directory, where the Loader's bare-specifier resolution reaches it, and the CLI appends any package declaring `dsh.bundle.patch` to `dsh.profile.bundles`. `apps/desktop/src/account/ensure-plugin.ts` runs that before the Host boots and skips it once the profile manifest records the dependency, so an ordinary launch starts no package manager. A failure there leaves the Host fully functional without the account page.
 

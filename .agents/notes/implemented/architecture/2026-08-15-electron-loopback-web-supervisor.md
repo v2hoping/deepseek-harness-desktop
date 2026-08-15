@@ -22,7 +22,7 @@ The packaged supervisor starts `resources/host/node_modules/@deepseek-ai/dsh/lib
 
 macOS and Windows use the same tracked `apps/desktop/build/icon.png` input without repository-side conversion. Local `package:desktop` output is unpacked and unsigned, so it requires no distribution credentials.
 
-The child remains the sole owner of the Web profile's Cordis tree, sessions, settings, credentials, filesystem and shell services, HTTP/WebSocket carrier, and quiescent disposal. Electron does not import those services into its main or renderer process. The BrowserWindow loads the validated loopback URL with Node integration disabled, context isolation and renderer sandboxing enabled, and no preload capability. This is still the existing local Web security model: the desktop shell adds no authentication or IPC authorization layer.
+The child remains the sole owner of the Web profile's Cordis tree, sessions, settings, credentials, filesystem and shell services, HTTP/WebSocket carrier, and quiescent disposal. Electron does not import those services into its main or renderer process. The BrowserWindow loads the validated loopback URL with Node integration disabled and context isolation and renderer sandboxing enabled. Its one preload exposes the desktop account methods and no raw IPC channel ([account provisioning](../feature/2026-08-15-desktop-account-key-provisioning.md)). This is still the existing local Web security model: the desktop shell adds no authentication or IPC authorization layer.
 
 The tray and Host supervisor own application lifetime independently of BrowserWindow visibility. A user window close is intercepted and hides the window; it neither quits Electron nor signals the child. Tray activation and macOS application activation show the existing window again. `window-all-closed` is not an exit request. The single-instance lock prevents a second desktop process and second Host child; a second launch only restores and focuses the primary window.
 
@@ -48,7 +48,7 @@ Every entry that needs Electron re-runs its idempotent binary unpack. pnpm runs 
 
 ### Upstream upgrades
 
-The fork's cost of tracking upstream is the nine existing files it edits, so `apps/desktop/scripts/upgrade-from-upstream.ts` automates only what carries no decision. It merges the upstream ref, resolves conflicts in `pnpm-lock.yaml` and `THIRD_PARTY_NOTICES.md` by regenerating them, and stops on every other conflict with the paths that need a human. It then reinstalls, refreshes generated files, runs the desktop closure check, and packages the application, so a completed run has already proven the merge builds.
+The fork's cost of tracking upstream is the existing files it edits — repository configuration, four release and hygiene scripts, and one onboarding extension seat — so `apps/desktop/scripts/upgrade-from-upstream.ts` automates only what carries no decision. It merges the upstream ref, resolves conflicts in `pnpm-lock.yaml` and `THIRD_PARTY_NOTICES.md` by regenerating them, and stops on every other conflict with the paths that need a human. It then reinstalls, refreshes generated files, runs the desktop closure check, and packages the application, so a completed run has already proven the merge builds.
 
 The readiness line is the one coupling no gate observes: an upstream format change merges cleanly and compiles. Starting the packaged application the run produces is what surfaces it.
 

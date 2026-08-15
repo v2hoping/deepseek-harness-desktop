@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-15-desktop-account-key-provisioning.md
-2026-08-15-desktop-account-key-provisioning.md: 2770e82db4c5a18d6088e277ef75c12c4ef1f6f3
-2026-08-15-desktop-account-key-provisioning.zh.md: d81979fef0dc4b4bbeb039ab513ab5cdc2739523
+2026-08-15-desktop-account-key-provisioning.md: 7b2cff770149ca72f2da2ab867a27f4d64acb64b
+2026-08-15-desktop-account-key-provisioning.zh.md: 39cddf50aa25ba8b3bc04e7da228c6edb2fe17c8
