@@ -673,3 +673,19 @@ select.input {
   font-size: 13px;
   overflow-wrap: anywhere;
 }
+
+/* Credential control group: the input and whatever additional control a
+ * surface offers beside it read as one field, so they sit flush on one line
+ * with a single outline between them. */
+.inputGroup {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.inputJoined {
+  flex: 1;
+  min-width: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}

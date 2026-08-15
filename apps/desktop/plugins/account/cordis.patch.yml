@@ -1,0 +1,12 @@
+# The desktop-account bundle patch: one row over whatever layer stack precedes
+# it. `dsh plugin --profile <name> add` appends this bundle to
+# `dsh.profile.bundles`, so it lands after dsh-base and the surface bundle and
+# adds a plugin rather than retargeting an existing row.
+#
+# The row's node half registers nothing on the Host; the browser half is what
+# carries the Settings section, and it returns without registering when the
+# Electron account bridge is absent (an ordinary `dsh web` browser tab).
+
+- insert:
+    - id: desktop-account
+      name: '@deepseek-ai/dsh-desktop-account'

@@ -1,0 +1,90 @@
+{
+  "name": "@deepseek-ai/dsh-desktop",
+  "description": "DeepSeek Harness desktop application with tray-owned Host lifecycle",
+  "version": "0.1.0-rc.5",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "directory": "apps/desktop"
+  },
+  "type": "module",
+  "main": "lib/main.js",
+  "scripts": {
+    "build": "pnpm --filter @deepseek-ai/dsh-desktop-account run build && tsc -p tsconfig.json && tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tests/tsconfig.json",
+    "ensure-electron": "node node_modules/electron/install.js",
+    "dev": "pnpm --workspace-root run build && pnpm run ensure-electron && electron .",
+    "package": "pnpm --workspace-root run build && pnpm run ensure-electron && node --import tsx scripts/stage-runtime.ts && electron-builder --dir",
+    "dist": "pnpm --workspace-root run build && pnpm run ensure-electron && node --import tsx scripts/stage-runtime.ts && electron-builder"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@deepseek-ai/dsh-desktop-account": "workspace:^",
+    "@types/node": "^22.20.0",
+    "electron": "43.4.0",
+    "electron-builder": "26.15.3",
+    "playwright": "^1.49.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  },
+  "build": {
+    "appId": "ai.deepseek.harness.desktop",
+    "productName": "DeepSeek Harness",
+    "electronDist": "node_modules/electron/dist",
+    "afterPack": "./scripts/verify-packaged-runtime.ts",
+    "asar": true,
+    "files": [
+      "lib/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "desktop-resources"
+      },
+      {
+        "from": "runtime-host/package.json",
+        "to": "host/package.json"
+      },
+      {
+        "from": "runtime-host/node_modules",
+        "to": "host/node_modules"
+      },
+      {
+        "from": "plugins/account",
+        "to": "account-plugin",
+        "filter": [
+          "**/*",
+          "!node_modules",
+          "!**/*.map",
+          "!tsconfig.tsbuildinfo"
+        ]
+      }
+    ],
+    "artifactName": "DeepSeek-Harness-${version}-${arch}.${ext}",
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "target": [
+        "dmg"
+      ]
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        "portable"
+      ]
+    },
+    "linux": {
+      "category": "Development",
+      "target": [
+        "dir"
+      ]
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-home-paths": "workspace:^"
+  }
+}
