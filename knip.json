@@ -744,6 +744,7 @@
     "apps/desktop": {
       "entry": [
         "src/main.ts",
+        "src/preload.ts",
         "scripts/**/*.ts",
         "tests/**/*.spec.ts"
       ],
@@ -794,6 +795,12 @@
     "packages/bundle/web-app": {
       "ignoreDependencies": [
         "@deepseek-ai/.+"
+      ]
+    },
+    "apps/desktop/plugins/account": {
+      "project": [
+        "src/**/*.ts",
+        "src/**/*.tsx"
       ]
     }
   }

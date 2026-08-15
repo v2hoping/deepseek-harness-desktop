@@ -10,6 +10,9 @@ packages:
   # Dependency-only deploy root for the packaged Electron Host. Its nested
   # location keeps it outside application build and release-family scans.
   - apps/desktop/runtime
+  # Desktop-only Harness plugins, installed into the profile as out-of-tree
+  # bundles rather than shipped with the upstream package tier.
+  - apps/desktop/plugins/*
   - website
   # The runnable demo leaves join as ONE workspace member: examples/package.json
   # declares the union of every leaf's cordis.yml plugins as workspace:*, so a

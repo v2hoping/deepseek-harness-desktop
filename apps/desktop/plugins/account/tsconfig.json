@@ -1,0 +1,23 @@
+{
+  // The browser half compiles against the client face; the bridge contract is
+  // type-only and shared with the Electron main process, which reads it
+  // through this package's `./bridge` export. References keep each dependency
+  // compiling under its own project rather than being pulled into this one.
+  "extends": "../../../../tsconfig.base.client.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    { "path": "../../../../vendor/cordis" },
+    { "path": "../../../../packages/client/ui-slots" },
+    { "path": "../../../../packages/client/runtime" },
+    { "path": "../../../../packages/client/ui-settings" },
+    { "path": "../../../../packages/client/web-react" },
+    { "path": "../../../../packages/client/locale" },
+    { "path": "../../../../packages/api/remotes/tsconfig.client.json" }
+  ]
+}

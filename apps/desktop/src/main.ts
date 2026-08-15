@@ -15,6 +15,8 @@ import {
   type Event,
   type MenuItemConstructorOptions,
 } from 'electron'
+import { ensureAccountPlugin } from './account/ensure-plugin.ts'
+import { registerAccountIpc } from './account/ipc.ts'
 import { createHostSupervisor, spawnDshWeb, type HostSupervisor } from './host-supervisor.ts'
 import { createDesktopLifecycle, type DesktopLifecycle } from './window-lifecycle.ts'
 
@@ -33,13 +35,20 @@ let bootQuitPromise: Promise<void> | undefined
 let quitReleased = false
 
 /** Resolve artifacts from the checkout in development and resourcesPath when packaged. */
-function hostPaths(): { nodeExecutable: string; cliEntry: string; cwd: string; electronRunAsNode: boolean } {
+function hostPaths(): {
+  nodeExecutable: string
+  cliEntry: string
+  cwd: string
+  electronRunAsNode: boolean
+  accountPluginDir: string
+} {
   if (!app.isPackaged) {
     return {
       nodeExecutable: process.env.DSH_DESKTOP_NODE_EXECUTABLE ?? 'node',
       cliEntry: join(REPOSITORY_ROOT, 'apps/cli/lib/bin.js'),
       cwd: process.cwd(),
       electronRunAsNode: false,
+      accountPluginDir: join(DESKTOP_DIR, 'plugins/account'),
     }
   }
   return {
@@ -47,6 +56,7 @@ function hostPaths(): { nodeExecutable: string; cliEntry: string; cwd: string; e
     cliEntry: join(process.resourcesPath, 'host/node_modules/@deepseek-ai/dsh/lib/bin.js'),
     cwd: app.getPath('home'),
     electronRunAsNode: true,
+    accountPluginDir: join(process.resourcesPath, 'account-plugin'),
   }
 }
 
@@ -110,6 +120,9 @@ async function createMainWindow(): Promise<BrowserWindow> {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      // The renderer's only shell capability is the account bridge; the
+      // preload exposes those three methods and nothing else.
+      preload: join(DESKTOP_DIR, 'lib/preload.cjs'),
     },
   })
   mainWindow = window
@@ -165,6 +178,15 @@ async function boot(): Promise<void> {
   if (bootQuitPromise !== undefined) return
   const paths = hostPaths()
   assertHostArtifacts(paths)
+  // Before the Host boots: the profile must already carry the account plugin
+  // for its browser half to reach the Settings pages of this launch.
+  ensureAccountPlugin({
+    nodeExecutable: paths.nodeExecutable,
+    cliEntry: paths.cliEntry,
+    pluginDir: paths.accountPluginDir,
+    electronRunAsNode: paths.electronRunAsNode,
+    log: chunk => process.stderr.write(chunk),
+  })
   host = createHostSupervisor({
     spawnHost: () => spawnDshWeb({
       ...paths,
@@ -181,6 +203,7 @@ async function boot(): Promise<void> {
   })
   hostOrigin = await host.start()
   hardenSession()
+  registerAccountIpc()
   lifecycle = createDesktopLifecycle({
     getWindow: () => mainWindow,
     createWindow: createMainWindow,

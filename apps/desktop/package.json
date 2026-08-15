@@ -11,7 +11,7 @@
   "type": "module",
   "main": "lib/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json && tsdown",
+    "build": "pnpm --filter @deepseek-ai/dsh-desktop-account run build && tsc -p tsconfig.json && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tests/tsconfig.json",
     "ensure-electron": "node node_modules/electron/install.js",
     "dev": "pnpm --workspace-root run build && pnpm run ensure-electron && electron .",
@@ -20,6 +20,7 @@
   },
   "license": "MIT",
   "devDependencies": {
+    "@deepseek-ai/dsh-desktop-account": "workspace:^",
     "@types/node": "^22.20.0",
     "electron": "43.4.0",
     "electron-builder": "26.15.3",
@@ -50,6 +51,16 @@
       {
         "from": "runtime-host/node_modules",
         "to": "host/node_modules"
+      },
+      {
+        "from": "plugins/account",
+        "to": "account-plugin",
+        "filter": [
+          "**/*",
+          "!node_modules",
+          "!**/*.map",
+          "!tsconfig.tsbuildinfo"
+        ]
       }
     ],
     "artifactName": "DeepSeek-Harness-${version}-${arch}.${ext}",
@@ -72,5 +83,8 @@
         "dir"
       ]
     }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-home-paths": "workspace:^"
   }
 }
