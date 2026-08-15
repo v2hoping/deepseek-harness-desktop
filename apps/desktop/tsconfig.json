@@ -1,0 +1,16 @@
+{
+  // Its own compiler face, outside tsconfig.host.json: the Electron types
+  // declare browser globals that must not reach the Host aggregate's program.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "types": [
+      "node",
+      "electron"
+    ]
+  },
+  "include": [
+    "src"
+  ]
+}
