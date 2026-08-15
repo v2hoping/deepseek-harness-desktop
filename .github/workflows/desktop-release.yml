@@ -7,11 +7,11 @@ name: Release desktop
 # the building platform. A macOS-built Windows package would ship macOS
 # binaries.
 #
-# Push a `desktop-v*` tag to publish, or dispatch manually to produce a draft
-# whose artifacts can be downloaded and started before anyone else sees them.
+# Push a `v*` tag to publish, or dispatch manually to produce a draft whose
+# artifacts can be downloaded and started before anyone else sees them.
 on:
   push:
-    tags: ['desktop-v*']
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       draft:
@@ -95,21 +95,21 @@ jobs:
       - name: Report collected artifacts
         run: ls -la artifacts/
 
-      # The tag names the release when one triggered this run; a manual
-      # dispatch derives it from the packaged version so a draft is
-      # distinguishable from the tagged release it rehearses.
+      # A tag names both the release and the version it announces, so the
+      # title always matches the tag a user sees. A manual run has no tag, so
+      # it labels its rehearsal from the packaged version instead.
       - name: Resolve release tag
         id: release
         run: |
-          version="$(node -p "require('./apps/desktop/package.json').version")"
           if [ "${{ github.event_name }}" = 'push' ]; then
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            tag="${GITHUB_REF_NAME}"
             echo "draft=false" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=desktop-v${version}-draft" >> "$GITHUB_OUTPUT"
+            tag="v$(node -p "require('./apps/desktop/package.json').version")-draft"
             echo "draft=${{ inputs.draft }}" >> "$GITHUB_OUTPUT"
           fi
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
       - name: Publish release
         env:

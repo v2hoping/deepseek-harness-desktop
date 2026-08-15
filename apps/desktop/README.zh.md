@@ -57,7 +57,7 @@ xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness.app"
 
 ## 发布
 
-`.github/workflows/desktop-release.yml` 在各目标自己的 runner 上构建——macOS 用 Apple silicon，Windows 用 x64——因为暂存的 Host 闭包按构建平台解析可选原生包，交叉构建出来的包会携带错误平台的二进制。推送 `desktop-v*` tag 即发布，或手动 dispatch 工作流得到一个草稿，其产物可以先启动验证再公开。macOS 交付磁盘映像，Windows 交付免安装的 `.exe`。
+`.github/workflows/desktop-release.yml` 在各目标自己的 runner 上构建——macOS 用 Apple silicon，Windows 用 x64——因为暂存的 Host 闭包按构建平台解析可选原生包，交叉构建出来的包会携带错误平台的二进制。推送 `v*` tag 即发布，或手动 dispatch 工作流得到一个草稿，其产物可以先启动验证再公开。macOS 交付磁盘映像，Windows 交付免安装的 `.exe`。
 
 ## 跟进上游
 
