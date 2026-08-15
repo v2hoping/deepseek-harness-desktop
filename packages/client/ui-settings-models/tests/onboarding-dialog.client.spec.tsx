@@ -138,6 +138,9 @@ function harness(options: {
     useModels: bindSnapshotSelector(controller.store),
     api: face as never,
     t: key => en[key],
+    // The credential-action seat is empty in these tests: this suite covers the
+    // step's own behavior, not what another plugin may offer beside its input.
+    renderSlot: () => null,
   }
   return {
     controller, complete, openSection, props, mutate, set,

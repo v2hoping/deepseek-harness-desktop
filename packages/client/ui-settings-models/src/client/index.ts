@@ -133,5 +133,6 @@ export function apply(ctx: ClientContext): void {
     id: 'deepseek-official',
     order: 0,
     inject: deepSeekOnboardingInjected,
+    children: { 'settings.onboarding.credentialAction': { kind: 'single', scope: 'root' } },
   }, DeepSeekOnboardingDialog))
 }

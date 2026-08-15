@@ -10,7 +10,7 @@ import { useEffect } from 'react'
 import type { ReactNode } from 'react'
 import type { IApiClient } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
-import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelsSettingsState, ModelsSettingsStore } from './store.ts'
 import { onboardingReadiness } from './store.ts'
 import { ProviderEditor } from './ProviderEditor.tsx'
@@ -34,7 +34,9 @@ export interface DeepSeekOnboardingInjected {
 
 /** Slot owner props plus the feature's injected dependencies. */
 export type DeepSeekOnboardingDialogProps =
-  PropsRuntime<'settings.onboarding'> & InjectFace<DeepSeekOnboardingInjected>
+  PropsRuntime<'settings.onboarding'>
+  & PropsRenderSlots<'settings.onboarding.credentialAction'>
+  & InjectFace<DeepSeekOnboardingInjected>
 
 /* v8 ignore next 3 -- closed-union defaults only defend future source widening */
 function assertNever(_value: never): never {
@@ -48,7 +50,7 @@ function assertNever(_value: never): never {
  * @returns the onboarding modal or null when onboarding needs no intervention.
  */
 export function DeepSeekOnboardingDialog(props: DeepSeekOnboardingDialogProps): ReactNode {
-  const { complete, controller, useModels, api, t } = props
+  const { complete, controller, useModels, api, t, renderSlot } = props
   const state = useModels(snapshot => snapshot)
   const readiness = onboardingReadiness(state)
 
@@ -98,6 +100,7 @@ export function DeepSeekOnboardingDialog(props: DeepSeekOnboardingDialogProps): 
       <p className={styles.description}>{t('onboardingDescription')}</p>
       <div className={styles.editor}>
         <ProviderEditor
+          credentialAction={renderSlot('settings.onboarding.credentialAction', { provider: row.entry.provider })}
           provider={row.entry.provider}
           displayName={row.entry.displayName}
           namespace={namespace}

@@ -45,6 +45,13 @@ const DEEPSEEK_PUBLIC_BASE_URL = 'https://api.deepseek.com'
 
 /** Props of {@link ProviderEditor}. */
 export interface ProviderEditorProps {
+  /**
+   * An additional control offered beside the credential input — another way to
+   * satisfy the key this card is asking for. Rendered inside the input's
+   * control group, so a surface that supplies one joins it to the field rather
+   * than stacking it elsewhere.
+   */
+  credentialAction?: ReactNode
   /** Provider route id. */
   provider: string
   /** Display name for the card title. */
@@ -361,19 +368,24 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
       <>
         <div className={styles['field']}>
           <span className={styles['fieldLabel']}>{t('keyInput')}</span>
-          <input
-            className={styles['input']}
-            type="password"
-            autoComplete="off"
-            value={keyDraft}
-            placeholder={keyPlaceholder}
-            aria-label={t('keyInput')}
-            aria-invalid={shownKeyFailure !== undefined}
-            required={props.credentialRequired === true}
-            autoFocus={props.autoFocusCredential === true}
-            disabled={disabled || keyLocked}
-            onChange={(event) => { setKeyDraft(event.target.value) }}
-          />
+          <div className={styles['inputGroup']}>
+            <input
+              className={props.credentialAction === undefined
+                ? styles['input']
+                : `${styles['input']} ${styles['inputJoined']}`}
+              type="password"
+              autoComplete="off"
+              value={keyDraft}
+              placeholder={keyPlaceholder}
+              aria-label={t('keyInput')}
+              aria-invalid={shownKeyFailure !== undefined}
+              required={props.credentialRequired === true}
+              autoFocus={props.autoFocusCredential === true}
+              disabled={disabled || keyLocked}
+              onChange={(event) => { setKeyDraft(event.target.value) }}
+            />
+            {props.credentialAction}
+          </div>
           {shownKeyFailure === undefined ? null : <p className={styles['error']}>{t(shownKeyFailure)}</p>}
         </div>
         {props.credentialOnly === true ? null : <details className={styles['customized']}>

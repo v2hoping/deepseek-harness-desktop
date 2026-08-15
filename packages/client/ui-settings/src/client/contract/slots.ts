@@ -72,6 +72,17 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'settings.onboarding': { kind: 'list'; scope: 'root'; owner: SettingsOnboardingOwnerProps }
     /**
+     * An additional way to satisfy the credential an onboarding step asks for,
+     * rendered beside its input. The step supplies the provider route so a
+     * registrant can decline routes it has no path for; a surface that offers
+     * no such path leaves the seat empty and the step is unchanged.
+     */
+    'settings.onboarding.credentialAction': {
+      kind: 'single'
+      scope: 'root'
+      owner: SettingsOnboardingCredentialActionOwnerProps
+    }
+    /**
      * One preference row inside the General section — the additive seat for a
      * single setting that needs no page of its own (a whole page is
      * `settings.section`), contributed by the feature plugin that owns the
@@ -88,6 +99,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'settings.general.item': { kind: 'list'; scope: 'root'; owner: SettingsGeneralItemOwnerProps }
   }
 }
+/** Owner share of an onboarding credential action: the route being configured. */
+export interface SettingsOnboardingCredentialActionOwnerProps {
+  /** Provider route key the step is asking for a credential for. */
+  provider: string
+}
+
 /** Owner share of a General preference row (the section supplies nothing). */
 export interface SettingsGeneralItemOwnerProps {
   /** Marker field: item owner props are intentionally empty. */
