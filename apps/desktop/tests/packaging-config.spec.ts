@@ -15,7 +15,7 @@ interface DesktopPackage {
       readonly to: string
     }[]
     readonly mac: { readonly icon: string; readonly target: readonly string[] }
-    readonly win: { readonly icon: string }
+    readonly win: { readonly icon: string; readonly target: readonly string[] }
   }
 }
 
@@ -115,5 +115,25 @@ describe('desktop packaging configuration', () => {
       .toBe('pnpm --filter @deepseek-ai/dsh-desktop run dev')
     expect(rootPackage.scripts['package:desktop'])
       .toBe('pnpm --filter @deepseek-ai/dsh-desktop run package')
+  })
+})
+
+describe('release matrix', () => {
+  const workflow = readFileSync(resolve(repositoryRoot, '.github/workflows/desktop-release.yml'), 'utf8')
+
+  it('builds each target on its own platform', () => {
+    // The staged Host closure resolves optional native packages for the
+    // building platform, so a cross-built package ships the wrong binaries.
+    expect(workflow).toMatch(/runner: macos-latest\n\s+target: macos-arm64/u)
+    expect(workflow).toMatch(/runner: windows-latest\n\s+target: windows-x64/u)
+  })
+
+  it('ships Windows as a portable executable', () => {
+    expect(desktopPackage.build.win.target).toEqual(['portable'])
+  })
+
+  it('grants release write only to the publishing job', () => {
+    expect(workflow).toContain('permissions:\n  contents: read')
+    expect(workflow.split('publish:')[1]).toContain('contents: write')
   })
 })

@@ -55,6 +55,10 @@ Dragging the application to Applications in Finder works as well, followed by th
 xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness.app"
 ```
 
+## Releasing
+
+`.github/workflows/desktop-release.yml` builds each target on its own runner — Apple silicon on macOS, x64 on Windows — because the staged Host closure resolves optional native packages for the building platform, so a cross-built package would ship the wrong binaries. Push a `desktop-v*` tag to publish, or dispatch the workflow manually for a draft whose artifacts can be started before anyone else sees them. macOS ships the disk image; Windows ships a portable `.exe` that runs without installing.
+
 ## Upstream upgrades
 
 One command merges the upstream Harness repository and rebuilds the application:

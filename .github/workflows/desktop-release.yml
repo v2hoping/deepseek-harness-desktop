@@ -1,0 +1,152 @@
+name: Release desktop
+
+# Builds the desktop application on each target's own runner and publishes the
+# artifacts to a GitHub release. Cross-building is not an option: the packaged
+# Host carries a production dependency closure staged by `pnpm deploy`, whose
+# optional native packages (node-pty, koffi, the Landlock launcher) resolve to
+# the building platform. A macOS-built Windows package would ship macOS
+# binaries.
+#
+# Push a `desktop-v*` tag to publish, or dispatch manually to produce a draft
+# whose artifacts can be downloaded and started before anyone else sees them.
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: Publish as a draft release.
+        type: boolean
+        required: false
+        default: true
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Release builds must never report to the production telemetry endpoint.
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macos-latest is Apple silicon, which is the target itself; an
+          # Intel build would need its own runner and its own closure.
+          - runner: macos-latest
+            target: macos-arm64
+            artifact: '*.dmg'
+          - runner: windows-latest
+            target: windows-x64
+            artifact: '*.exe'
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Builds the repository, stages the Host closure, and runs Electron
+      # Builder. The afterPack check fails the job when the staged CLI or Web
+      # frontend entry is missing, so a broken closure never reaches a release.
+      - name: Package
+        run: pnpm run dist:desktop
+
+      - name: Report artifacts
+        shell: bash
+        run: ls -la apps/desktop/dist/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.target }}
+          path: apps/desktop/dist/${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v6
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Report collected artifacts
+        run: ls -la artifacts/
+
+      # The tag names the release when one triggered this run; a manual
+      # dispatch derives it from the packaged version so a draft is
+      # distinguishable from the tagged release it rehearses.
+      - name: Resolve release tag
+        id: release
+        run: |
+          version="$(node -p "require('./apps/desktop/package.json').version")"
+          if [ "${{ github.event_name }}" = 'push' ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "draft=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=desktop-v${version}-draft" >> "$GITHUB_OUTPUT"
+            echo "draft=${{ inputs.draft }}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+          DRAFT: ${{ steps.release.outputs.draft }}
+        run: |
+          notes="$(cat <<'BODY'
+          ## Install
+
+          **macOS (Apple silicon)** — the disk image is unsigned, so macOS
+          reports it as damaged until the download quarantine attribute is
+          removed. Drag the app to Applications, then run:
+
+          ```sh
+          xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness.app"
+          ```
+
+          Or let the installer do all of it:
+
+          ```sh
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/master/apps/desktop/scripts/install.sh | bash
+          ```
+
+          **Windows (x64)** — the `.exe` is portable: run it, no installation.
+          It is unsigned, so SmartScreen asks once; choose **More info → Run
+          anyway**.
+
+          ## Notes
+
+          Closing the window keeps the app in the tray; quit from the tray to
+          stop it. Set up a DeepSeek API key from the first-run screen or from
+          Settings → Account.
+          BODY
+          )"
+          gh release create "$TAG" artifacts/* \
+            --title "DeepSeek Harness Desktop $VERSION" \
+            --notes "$notes" \
+            $([ "$DRAFT" = 'true' ] && echo '--draft')
