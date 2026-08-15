@@ -38,6 +38,12 @@ The supervisor presents start/readiness/shutdown facts to the Electron applicati
 
 The package keeps its own compiler face rather than joining `tsconfig.host.json`: the Electron type package declares browser globals that must not reach the Host aggregate's program. `apps/desktop/runtime` is a separate nested workspace member so the deploy-only manifest stays outside application build and release-family scans.
 
+### Upstream upgrades
+
+The fork's cost of tracking upstream is the nine existing files it edits, so `apps/desktop/scripts/upgrade-from-upstream.ts` automates only what carries no decision. It merges the upstream ref, resolves conflicts in `pnpm-lock.yaml` and `THIRD_PARTY_NOTICES.md` by regenerating them, and stops on every other conflict with the paths that need a human. It then reinstalls, refreshes generated files, runs the desktop closure check, and packages the application, so a completed run has already proven the merge builds.
+
+The readiness line is the one coupling no gate observes: an upstream format change merges cleanly and compiles. Starting the packaged application the run produces is what surfaces it.
+
 ## Verification
 
 `apps/desktop/tests/host-supervisor.spec.ts` pins readiness across arbitrary stdout chunks and an unterminated final line, rejects invalid schemes, hosts, ports, and missing readiness, and covers one in-flight start, startup failures, early exits, idempotent shutdown, cooperative `SIGTERM` settlement, and the one-shot timeout escalation. `apps/desktop/tests/window-lifecycle.spec.ts` pins close-as-hide, coalesced window creation, quit-time restoration refusal, and one Host disposal before Electron's quit retry. `apps/desktop/tests/packaging-config.spec.ts` pins the shared source icon, the complete-build and runtime-staging commands, the packaged Host resource mapping, the pinned Electron distribution, and the repository-root entries. `apps/desktop/tests/verify-packaged-runtime.spec.ts` pins the pre-package rejection of missing Host entrypoints. Source checks and review pin the Electron event wiring, single-instance restoration, exact-origin navigation policy, and hardened BrowserWindow settings.

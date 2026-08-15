@@ -38,6 +38,12 @@ macOS 与 Windows 使用同一份纳入版本管理的 `apps/desktop/build/icon.
 
 该包保留自己的编译面而不加入 `tsconfig.host.json`：Electron 类型包声明的浏览器全局不能进入 Host 聚合的程序。`apps/desktop/runtime` 是独立的嵌套工作区成员，使这份仅用于 deploy 的清单留在应用构建与发布族扫描之外。
 
+### Upstream upgrades
+
+这个 fork 跟进上游的成本就是它改动的九个既有文件，因此 `apps/desktop/scripts/upgrade-from-upstream.ts` 只自动化不含决策的部分。它合并上游 ref，通过重新生成解决 `pnpm-lock.yaml` 与 `THIRD_PARTY_NOTICES.md` 的冲突，并在其它任何冲突上停下，列出需要人处理的路径。随后它重装依赖、刷新生成物、运行桌面闭包检查并打包应用，因此一次完整跑通的运行已经证明该合并可构建。
+
+就绪行是唯一没有门禁观察的耦合：上游改变格式时合并干净、编译通过。启动本轮产出的打包应用才会让它暴露。
+
 ## Verification
 
 `apps/desktop/tests/host-supervisor.spec.ts` 钉住任意 stdout 分片与未终止末行下的就绪解析，拒绝非法的协议、主机、端口与缺失的就绪行，并覆盖单次在途启动、启动失败、提前退出、幂等关闭、协作式 `SIGTERM` 落定，以及一次性的超时升级。`apps/desktop/tests/window-lifecycle.spec.ts` 钉住关闭即隐藏、窗口创建的合并、退出期间拒绝恢复，以及 Electron 重试退出之前只处置一次 Host。`apps/desktop/tests/packaging-config.spec.ts` 钉住共享的源图标、完整构建与运行时暂存命令、打包 Host 的资源映射、锁定的 Electron 分发，以及仓库根入口。`apps/desktop/tests/verify-packaged-runtime.spec.ts` 钉住 Host 入口缺失时在打包前的拒绝。源码检查与评审钉住 Electron 事件接线、单实例恢复、精确同源的导航策略，以及收紧的 BrowserWindow 设置。
