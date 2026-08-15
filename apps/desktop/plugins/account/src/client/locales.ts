@@ -31,7 +31,7 @@ export const zh: Record<AccountKey, string> = {
   'nav': '账户',
   'title': 'DeepSeek API Key',
   'intro': '在 DeepSeek 开放平台创建一个，创建后自动存为本应用的模型凭据。',
-  'intro.configured': '快速打开会打开平台页面，你创建的新 Key 会立即更新模型 DeepSeek。',
+  'intro.configured': '快速获得会打开平台页面，你创建的新 Key 会立即更新模型 DeepSeek。',
   'state.loading': '正在读取模型凭据…',
   'key.title': '获得的 Key',
   'key.show': '显示',
