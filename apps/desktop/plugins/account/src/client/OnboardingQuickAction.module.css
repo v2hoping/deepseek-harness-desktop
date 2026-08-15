@@ -1,0 +1,35 @@
+/* The quick action is the right half of the credential control group: same
+ * height as the input, meeting its border flush, with only the group's outer
+ * corners round. Slightly roomier than the input's own padding so the control
+ * reads as the primary way forward. */
+
+.joinedButton {
+  box-sizing: border-box;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 16px;
+  border: none;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-label-primary-foreground);
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.joinedButton:hover:not(:disabled) {
+  background: var(--dsw-alias-button-primary-hover);
+}
+
+.joinedButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

@@ -1,6 +1,6 @@
 /** The Account section: get a DeepSeek API key into the model credential. */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-locale/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AccountPage } from '../bridge.ts'
@@ -24,17 +24,53 @@ export interface AccountSectionInjected {
 export type AccountSectionComponentProps =
   PropsRuntime<'settings.section'> & AccountSectionInjected
 
-/** One official-platform link row. */
-function PlatformLink({ page, label, onOpen }: {
-  page: AccountPage
-  label: string
-  onOpen: (page: AccountPage) => void
+/** One Setting-Cell row: title over description, control at the row's end. */
+function Row({ title, description, children }: {
+  title: string
+  description?: string | undefined
+  children?: ReactNode
 }) {
   return (
-    <button type="button" className={css.link} onClick={() => { onOpen(page) }}>
-      {label}
-    </button>
+    <div className={css.row}>
+      <div className={css.rowText}>
+        <div className={css.title}>{title}</div>
+        {description !== undefined && <div className={css.description}>{description}</div>}
+      </div>
+      {children}
+    </div>
   )
+}
+
+/** Mask a key down to its recognizable ends. */
+function maskKey(value: string): string {
+  return value.length <= 12 ? '••••••••' : `${value.slice(0, 7)}••••••••${value.slice(-4)}`
+}
+
+/** The obtained key: its value behind a reveal, for this session only. */
+function KeyRow({ state, t }: { state: AccountPageState; t: TranslateNS<'account'> }) {
+  const [revealed, setRevealed] = useState(false)
+  const value = state.keyValue
+  if (value === undefined) return null
+  return (
+    <Row title={t('key.title')}>
+      <span className={css.keyValue}>{revealed ? value : maskKey(value)}</span>
+      <button
+        type="button"
+        className={css.linkButton}
+        onClick={() => { setRevealed(current => !current) }}
+      >
+        {revealed ? t('key.hide') : t('key.show')}
+      </button>
+    </Row>
+  )
+}
+
+/** The key row's description, which says what its button will do. */
+function keyDescription(state: AccountPageState, t: TranslateNS<'account'>): string {
+  if (state.status === 'loading') return t('state.loading')
+  if (state.credentialRef === undefined) return t('state.noRef')
+  if (state.configured && !state.writable) return t('state.readonly')
+  return state.configured ? t('intro.configured') : t('intro')
 }
 
 /**
@@ -44,53 +80,24 @@ function PlatformLink({ page, label, onOpen }: {
  */
 export function AccountSection({ controller, useSnapshot, t }: AccountSectionComponentProps) {
   const state = useSnapshot(s => s)
-  const [pasted, setPasted] = useState('')
 
   useEffect(() => { void controller.load() }, [controller])
 
   const busy = state.busy !== 'none'
-  const openPage = (page: AccountPage): void => { void controller.openPage(page) }
+  const links: readonly { page: AccountPage; title: string; description?: string }[] = [
+    { page: 'top-up', title: t('links.topUp') },
+    { page: 'usage', title: t('links.usage') },
+    { page: 'billing', title: t('links.billing') },
+    { page: 'api-keys', title: t('links.apiKeys') },
+  ]
 
   return (
     <div className={css.section}>
-      <h2 className={css.title}>{t('title')}</h2>
-      <p className={css.intro}>{t('intro')}</p>
-
-      <div className={css.status}>
-        {state.status === 'loading' && <span className={css.muted}>{t('state.loading')}</span>}
-        {state.status === 'ready' && state.credentialRef === undefined && (
-          <span className={css.warn}>{t('state.noRef')}</span>
-        )}
-        {state.status === 'ready' && state.credentialRef !== undefined && (
-          <>
-            <span className={state.configured ? css.ok : css.warn}>
-              {state.configured ? t('state.configured') : t('state.missing')}
-            </span>
-            {state.configured && state.source !== undefined && (
-              <span className={css.muted}>{t('state.configured.source', { source: state.source })}</span>
-            )}
-            {state.configured && !state.writable && (
-              <span className={css.muted}>{t('state.readonly')}</span>
-            )}
-          </>
-        )}
-        {state.balance !== undefined && (
-          <span className={state.balance.available ? css.ok : css.warn}>
-            {state.balance.available
-              ? t('balance', { total: state.balance.total, currency: state.balance.currency })
-              : t('balance.unavailable')}
-          </span>
-        )}
-      </div>
-
-      {state.error !== undefined && <p className={css.error}>{state.error}</p>}
-      {state.notice === 'stored' && <p className={css.ok}>{t('notice.stored')}</p>}
-
-      {state.credentialRef !== undefined && state.writable !== false && (
-        <div className={css.actions}>
+      <Row title={t('title')} description={keyDescription(state, t)}>
+        {state.credentialRef !== undefined && state.writable && (
           <button
             type="button"
-            className={css.primary}
+            className={css.primaryButton}
             disabled={busy}
             onClick={() => { void controller.provision() }}
           >
@@ -98,46 +105,27 @@ export function AccountSection({ controller, useSnapshot, t }: AccountSectionCom
               ? t('action.provisioning')
               : state.configured ? t('action.replace') : t('action.provision')}
           </button>
-          <span className={css.muted}>{t('action.provision.hint')}</span>
-        </div>
+        )}
+      </Row>
+
+      <KeyRow state={state} t={t} />
+
+
+      {state.error !== undefined && (
+        <Row title={t('error.title')} description={state.error} />
       )}
 
-      {state.credentialRef !== undefined && (
-        <div className={css.paste}>
-          <label className={css.pasteLabel} htmlFor="dsh-account-key">{t('paste.label')}</label>
-          <div className={css.pasteRow}>
-            <input
-              id="dsh-account-key"
-              className={css.input}
-              type="password"
-              autoComplete="off"
-              placeholder={t('paste.placeholder')}
-              value={pasted}
-              disabled={busy}
-              onChange={(event) => { setPasted(event.target.value) }}
-            />
-            <button
-              type="button"
-              className={css.secondary}
-              disabled={busy || pasted.trim() === ''}
-              onClick={() => {
-                void controller.saveKey(pasted).then(() => { setPasted('') })
-              }}
-            >
-              {state.busy === 'saving' ? t('paste.saving') : t('paste.save')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className={css.links}>
-        <span className={css.linksTitle}>{t('links.title')}</span>
-        <PlatformLink page="top-up" label={t('links.topUp')} onOpen={openPage} />
-        <PlatformLink page="usage" label={t('links.usage')} onOpen={openPage} />
-        <PlatformLink page="billing" label={t('links.billing')} onOpen={openPage} />
-        <PlatformLink page="api-keys" label={t('links.apiKeys')} onOpen={openPage} />
-      </div>
-      <p className={css.muted}>{t('links.topUp.hint')}</p>
+      {links.map(link => (
+        <Row
+          key={link.page}
+          title={link.title}
+          {...link.description === undefined ? {} : { description: link.description }}
+        >
+          <button type="button" className={css.linkButton} onClick={() => { void controller.openPage(link.page) }}>
+            {t('links.open')}
+          </button>
+        </Row>
+      ))}
     </div>
   )
 }

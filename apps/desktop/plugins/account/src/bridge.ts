@@ -3,20 +3,17 @@
  * preload bridge, and the browser half. Types only: the renderer reaches the
  * implementation through `window.dshDesktop.account`, never by import.
  *
- * The shell never authenticates as the user. Account pages open in a window
- * that carries the platform's own session, every request comes from that
- * page, and the shell only observes the response that carries a newly created
- * key. Balance is read with the user's own API key through the public
- * endpoint, which needs no session at all.
+ * The shell never authenticates as the user and issues no request of its own.
+ * Account pages open in a window that carries the platform's own session,
+ * every request comes from that page, and the shell only observes the response
+ * that carries a newly created key.
  */
 
 /** Why an account operation could not produce a value. */
 export type AccountFailure =
   /** The user closed the account window before finishing. */
   | 'cancelled'
-  /** The API key was refused by the public endpoint. */
-  | 'invalid-key'
-  /** The endpoint could not be reached, or its response did not parse. */
+  /** The window could not be observed, so no key could be captured. */
   | 'request-failed'
 
 /** Outcome of one account operation, discriminated so the UI can degrade precisely. */
@@ -28,18 +25,6 @@ export type AccountResult<T> =
 export interface CapturedApiKey {
   /** The full secret, readable only in the creation response. */
   readonly secret: string
-  /** Key name as the platform recorded it, when the response carries one. */
-  readonly name?: string
-}
-
-/** Account balance from the public `GET /user/balance` endpoint. */
-export interface BalanceSummary {
-  /** Whether the account can serve requests. */
-  readonly available: boolean
-  /** Total balance as the endpoint reports it. */
-  readonly total: string
-  /** Currency code of {@link total}. */
-  readonly currency: string
 }
 
 /** Official pages the shell opens in a window sharing the platform session. */
@@ -51,12 +36,6 @@ export type AccountPage = 'sign-in' | 'api-keys' | 'usage' | 'top-up' | 'billing
  * has to read an Error message.
  */
 export interface AccountBridge {
-  /**
-   * Check one API key against the public balance endpoint.
-   * @param secret - The key the probe authenticates with.
-   * @returns The balance when the key works, or why the probe failed.
-   */
-  checkKey(secret: string): Promise<AccountResult<BalanceSummary>>
   /**
    * Open one official page in a window that carries the platform session.
    * @param page - Which page to open.

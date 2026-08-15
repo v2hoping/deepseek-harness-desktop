@@ -11,7 +11,6 @@ import type { AccountBridge, AccountPage } from '@deepseek-ai/dsh-desktop-accoun
 import { ACCOUNT_CHANNELS } from './account/channels.ts'
 
 const account: AccountBridge = {
-  checkKey: secret => ipcRenderer.invoke(ACCOUNT_CHANNELS.checkKey, secret),
   openPage: (page: AccountPage) => ipcRenderer.invoke(ACCOUNT_CHANNELS.openPage, page),
   provisionKey: () => ipcRenderer.invoke(ACCOUNT_CHANNELS.provisionKey),
 }

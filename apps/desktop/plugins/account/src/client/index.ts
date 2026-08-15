@@ -17,6 +17,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 // Type-only: pulls ctx.locale into this program.
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import { AccountSection, type AccountSectionInjected } from './AccountSection.tsx'
+import { OnboardingQuickAction } from './OnboardingQuickAction.tsx'
 import { AccountStore, type AccountApi } from './account-store.ts'
 import { en, zh, type AccountKey } from './locales.ts'
 
@@ -66,4 +67,12 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     inject: injected,
   }, AccountSection))
+
+  // The same controller drives the first-run step, so a key obtained there is
+  // the one the Account section then shows.
+  ctx.slots.inject('settings.onboarding.credentialAction', () => ctx.slots.register({
+    name: 'settings.onboarding.credentialAction',
+    locale: NS,
+    inject: injected,
+  }, OnboardingQuickAction))
 }

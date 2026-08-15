@@ -216,6 +216,9 @@ async function boot(): Promise<void> {
 }
 
 if (!app.requestSingleInstanceLock()) {
+  // Say so: a silent exit here is indistinguishable from a crash, and the
+  // lock outlives a force-killed instance for a moment.
+  console.error(`${APP_NAME} is already running; its existing window was raised instead.`)
   app.quit()
 } else {
   app.on('second-instance', () => { void lifecycle?.showWindow() })

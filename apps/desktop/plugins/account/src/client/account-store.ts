@@ -1,16 +1,17 @@
 /**
  * Account page controller: read how the DeepSeek provider is credentialed, and
- * drive the two paths that put a working key there.
+ * drive the path that puts a working key there.
  *
- * Both paths validate before they store. `credentials.describe` never returns
- * values, so an already-stored key cannot be re-checked from here — what this
- * controller guarantees is that a key it writes was accepted by the public
- * balance endpoint first.
+ * The key it obtains is stored through the credential subsystem and kept in
+ * this controller's memory for the rest of the session, so the page can show
+ * which key it just produced. Nothing about it is persisted here: closing the
+ * application forgets the value, while the key itself stays where
+ * the credential subsystem put it.
  */
 
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
-import type { AccountBridge, AccountPage, BalanceSummary } from '../bridge.ts'
+import type { AccountBridge, AccountPage } from '../bridge.ts'
 
 /** The provider route this page configures. */
 const DEEPSEEK_ROUTE = 'deepseek-official'
@@ -23,27 +24,20 @@ export interface AccountPageState {
   credentialRef?: string | undefined
   /** Whether some layer already supplies a key. */
   configured: boolean
-  /** Winning layer when configured (`env`, `file`, …). */
-  source?: string | undefined
   /** Whether this reference can be written from here. */
   writable: boolean
-  /** Whether the provider route is registered and requestable. */
-  active: boolean
-  /** Balance from the most recent successful validation this session. */
-  balance?: BalanceSummary | undefined
+  /** The key obtained in this session, shown on request; never persisted. */
+  keyValue?: string | undefined
   /** In-flight operation, so the page can disable its actions. */
-  busy: 'none' | 'provisioning' | 'saving'
+  busy: 'none' | 'provisioning'
   /** Last failure, shown until the next attempt. */
   error?: string | undefined
-  /** Last success, shown until the next attempt. */
-  notice?: string | undefined
 }
 
 const INITIAL: AccountPageState = {
   status: 'idle',
   configured: false,
   writable: false,
-  active: false,
   busy: 'none',
 }
 
@@ -88,8 +82,6 @@ interface NamespaceRow {
 interface CredentialRow {
   /** Whether some layer supplies a non-empty value. */
   configured: boolean
-  /** Winning layer when configured. */
-  source?: string
   /** Whether `credentials.set` can affect this reference. */
   writable: boolean
 }
@@ -191,9 +183,7 @@ export class AccountStore {
         s.error = undefined
         s.credentialRef = ref
         s.configured = credential?.configured ?? false
-        s.source = credential?.source
         s.writable = credential?.writable ?? false
-        s.active = entry?.active ?? false
       })
     } catch (error) {
       if (generation !== this.generation) return
@@ -203,10 +193,10 @@ export class AccountStore {
 
   /**
    * Open the official API keys page and store whatever key the user creates
-   * there, once the public endpoint accepts it.
+   * there, then keep it visible for the rest of the session.
    */
   async provision(): Promise<void> {
-    this.store.update((s) => { s.busy = 'provisioning'; s.error = undefined; s.notice = undefined })
+    this.store.update((s) => { s.busy = 'provisioning'; s.error = undefined })
     try {
       const captured = await this.bridge.provisionKey()
       if (!captured.ok) {
@@ -224,20 +214,6 @@ export class AccountStore {
   }
 
   /**
-   * Validate and store a key the user pasted.
-   * @param secret - the key to check and store.
-   */
-  async saveKey(secret: string): Promise<void> {
-    const trimmed = secret.trim()
-    if (trimmed === '') {
-      this.store.update((s) => { s.error = 'enter an API key first' })
-      return
-    }
-    this.store.update((s) => { s.busy = 'saving'; s.error = undefined; s.notice = undefined })
-    await this.storeKey(trimmed)
-  }
-
-  /**
    * Open one official page.
    * @param page - which page to open.
    */
@@ -245,7 +221,7 @@ export class AccountStore {
     await this.bridge.openPage(page)
   }
 
-  /** Validate one key, store it under the provider's reference, and reload. */
+  /** Store one captured key under the provider's reference, then reload. */
   private async storeKey(secret: string): Promise<void> {
     const ref = this.store.getSnapshot().credentialRef
     if (ref === undefined) {
@@ -255,21 +231,25 @@ export class AccountStore {
       })
       return
     }
-    const checked = await this.bridge.checkKey(secret)
-    if (!checked.ok) {
-      this.store.update((s) => { s.busy = 'none'; s.error = checked.message })
-      return
-    }
+    // Store first. The check does not decide whether to store — a key the
+    // platform has just issued is not accepted by its API right away, and
+    // refusing to store one the user just created would lose it, since its
+    // secret is shown once. Storing first is also what keeps the button from
+    // sitting in its waiting state through the check's retries.
     const stored = await this.api.credentials.set({ ref, value: secret })
     if (!stored.result.ok) {
-      this.store.update((s) => { s.busy = 'none'; s.error = stored.result.ok ? '' : stored.result.error.message })
+      this.store.update((s) => {
+        s.busy = 'none'
+        s.error = stored.result.ok ? '' : stored.result.error.message
+      })
       return
     }
     this.store.update((s) => {
       s.busy = 'none'
-      s.balance = checked.value
-      s.notice = 'stored'
+      // Session-only: shown until this window closes.
+      s.keyValue = secret
     })
     await this.load()
   }
+
 }

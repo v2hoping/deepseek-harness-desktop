@@ -5,6 +5,11 @@
  * process: sign-in needs the platform's own session and a top-level window,
  * neither of which the Host owns. This half exists so the Loader can mount the
  * package and `dsh-client-modules` can serve its browser bundle.
+ *
+ * Nothing about the obtained key is persisted here. The page shows the key it
+ * just produced for the rest of the session and forgets it on exit; the key
+ * itself lives only in the credential layer, where the credential subsystem
+ * owns it.
  */
 
 /** Plugin name the Loader records for this row. */

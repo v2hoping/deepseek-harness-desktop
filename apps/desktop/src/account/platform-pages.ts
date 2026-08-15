@@ -1,11 +1,9 @@
 /**
  * Official DeepSeek pages and the one public endpoint this application uses.
  *
- * The shell never calls the platform's internal website endpoints. Account
- * pages open in a window that carries the platform's own session, so every
- * request the platform sees comes from its own page with its own device
- * identity. The only request this application issues is to the documented
- * public balance endpoint, authenticated by the user's own API key.
+ * The shell never calls the platform's endpoints at all. Account pages open in
+ * a window that carries the platform's own session, so every request the
+ * platform sees comes from its own page with its own device identity.
  */
 
 import type { AccountPage } from '@deepseek-ai/dsh-desktop-account/bridge'
@@ -21,9 +19,6 @@ export const PLATFORM_PAGES: Readonly<Record<AccountPage, string>> = {
   'top-up': `${PLATFORM_ORIGIN}/top_up`,
   billing: `${PLATFORM_ORIGIN}/billing`,
 }
-
-/** The documented public endpoint that reports an API key's account balance. */
-export const BALANCE_ENDPOINT = 'https://api.deepseek.com/user/balance'
 
 /**
  * Session partition holding the platform sign-in, kept apart from the

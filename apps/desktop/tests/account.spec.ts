@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { isPluginInstalled } from '../src/account/ensure-plugin.ts'
 import { captureApiKey } from '../src/account/key-capture.ts'
+import { createResponseTracker } from '../src/account/response-tracker.ts'
 
 describe('created API key capture', () => {
   it('takes the complete secret out of a creation response', () => {
@@ -12,10 +13,7 @@ describe('created API key capture', () => {
       data: { biz_data: { name: 'dsh-desktop', key: 'sk-1234567890abcdefghijklmnopqrstuv' } },
     })
 
-    expect(captureApiKey(body)).toEqual({
-      secret: 'sk-1234567890abcdefghijklmnopqrstuv',
-      name: 'dsh-desktop',
-    })
+    expect(captureApiKey(body)).toEqual({ secret: 'sk-1234567890abcdefghijklmnopqrstuv' })
   })
 
   it('ignores the masked values the key listing returns', () => {
@@ -27,7 +25,7 @@ describe('created API key capture', () => {
     expect(captureApiKey(body)).toBeUndefined()
   })
 
-  it('reports a secret without a name when the response carries none', () => {
+  it('reads a secret from a body carrying nothing else', () => {
     expect(captureApiKey('{"key":"sk-abcdefghijklmnopqrstuvwxyz012345"}'))
       .toEqual({ secret: 'sk-abcdefghijklmnopqrstuvwxyz012345' })
   })
@@ -66,5 +64,54 @@ describe('account plugin installation state', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('platform response tracking', () => {
+  it('tracks only the platform API and hands each body back once', () => {
+    const tracker = createResponseTracker('/api/v0/')
+
+    expect(tracker.observe('r1', 'https://platform.deepseek.com/api/v0/users/create_api_key')).toBe(true)
+    expect(tracker.observe('r2', 'https://platform.deepseek.com/static/app.js')).toBe(false)
+    expect(tracker.size).toBe(1)
+
+    // The body is read at loadingFinished, which claims the request.
+    expect(tracker.claim('r1')).toBe('https://platform.deepseek.com/api/v0/users/create_api_key')
+    expect(tracker.claim('r1')).toBeUndefined()
+    expect(tracker.claim('r2')).toBeUndefined()
+    expect(tracker.size).toBe(0)
+  })
+
+  it('bounds itself when responses never report completion', () => {
+    const tracker = createResponseTracker('/api/v0/')
+    for (let i = 0; i < 200; i += 1) tracker.observe(`r${String(i)}`, `https://platform.deepseek.com/api/v0/x/${String(i)}`)
+
+    expect(tracker.size).toBe(64)
+    // The oldest were evicted; the newest survive.
+    expect(tracker.claim('r0')).toBeUndefined()
+    expect(tracker.claim('r199')).toBe('https://platform.deepseek.com/api/v0/x/199')
+  })
+})
+
+describe('creation-only capture', () => {
+  it('never mistakes a listing refresh for the created key', () => {
+    // What the page does right after a creation: GET the list, whose entries
+    // carry masked values only.
+    const listing = JSON.stringify({
+      data: { biz_data: { api_keys: [
+        { name: 'one', sensitive_id: 'sk-75dc3***********************0a11', tracking_id: '9cf4f9a4-b2e8' },
+        { name: 'two', sensitive_id: 'sk-1a2b3***********************a54c', tracking_id: '1b2c3d4e-5f60' },
+      ] } },
+    })
+
+    expect(captureApiKey(listing)).toBeUndefined()
+  })
+
+  it('reads a base64-transferred creation body', () => {
+    const body = JSON.stringify({ data: { biz_data: { name: 'dsh', key: 'sk-abcdefghijklmnopqrstuvwxyz0123' } } })
+    const encoded = Buffer.from(body, 'utf8').toString('base64')
+
+    expect(captureApiKey(Buffer.from(encoded, 'base64').toString('utf8')))
+      .toEqual({ secret: 'sk-abcdefghijklmnopqrstuvwxyz0123' })
   })
 })
