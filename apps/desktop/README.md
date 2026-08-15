@@ -25,7 +25,15 @@ pnpm run package:desktop   # apps/desktop/dist/<platform>/DeepSeek Harness.app
 pnpm run dist:desktop      # apps/desktop/dist/DeepSeek-Harness-<version>-<arch>.dmg
 ```
 
-Packaged applications run the staged `@deepseek-ai/dsh` CLI in a separate process through Electron's Node mode. The application therefore retains the supervised-Host lifecycle without shipping a second Node executable. An `afterPack` check rejects the package when the staged CLI entry or Web frontend entry is absent. Both macOS and Windows use the exact tracked `apps/desktop/build/icon.png` source; the repository does not preprocess or commit platform-specific icon variants.
+Packaged applications run the staged `@deepseek-ai/dsh` CLI in a separate process through Electron's Node mode. The application therefore retains the supervised-Host lifecycle without shipping a second Node executable. An `afterPack` check rejects the package when the staged CLI entry or Web frontend entry is absent.
+
+Both macOS and Windows use the exact tracked `apps/desktop/build/icon.png` source; the repository does not commit platform-specific icon variants. That icon and the two tray templates render from `apps/web/public/favicon.svg`, the fish mark the sidebar and browser tab already show, so one shape identifies the product everywhere:
+
+```sh
+node --import tsx apps/desktop/scripts/gen-icons.ts
+```
+
+The application icon plates the mark on the rounded white tile macOS expects; the tray templates keep it black on transparent, which is what lets macOS invert them for a dark menu bar. Regenerating changes the digests `tests/packaging-config.spec.ts` pins, so an unintended icon swap fails there.
 
 Every command that needs Electron re-runs its idempotent binary unpack first. pnpm performs that unpack once when the package is installed and not again after the unpacked binary is removed, so a tree that lost it would otherwise fail only at packaging time.
 

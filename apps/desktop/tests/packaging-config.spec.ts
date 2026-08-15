@@ -51,13 +51,26 @@ describe('desktop packaging configuration', () => {
     expect(desktopPackage.build.afterPack).toBe('./scripts/verify-packaged-runtime.ts')
   })
 
-  it('keeps the supplied image byte-for-byte and shares it across macOS and Windows', () => {
-    const icon = readFileSync(resolve(desktopRoot, 'build/icon.png'))
+  it('renders every icon from the client fish mark and shares one source across platforms', () => {
+    // Regenerate with `node --import tsx apps/desktop/scripts/gen-icons.ts`;
+    // these digests are what makes an unintended icon swap fail.
+    const digest = (file: string): string =>
+      createHash('sha256').update(readFileSync(resolve(desktopRoot, file))).digest('hex')
 
-    expect(createHash('sha256').update(icon).digest('hex'))
-      .toBe('e9fa2ac692491c051536fb5d322e7eefe874d3977892e82852295d137bf27d91')
+    expect(digest('build/icon.png'))
+      .toBe('62f1edb3e88dec3b5844ec2994a91bf5990931b51e4c3f11d33d2d2809c9224f')
+    expect(digest('resources/trayTemplate.png'))
+      .toBe('d6f333e2c67fbf6d0af3b4b0e783f6c48e5119e3caac71556a14cbab17a040df')
+    expect(digest('resources/trayTemplate@2x.png'))
+      .toBe('7c1109761fbe916ed7444d3197275998fb251c5d617096b8d83d397eb2ecc831')
     expect(desktopPackage.build.mac.icon).toBe('build/icon.png')
     expect(desktopPackage.build.win.icon).toBe('build/icon.png')
+  })
+
+  it('generates the icons from the mark the Web client already ships', () => {
+    const generator = readFileSync(resolve(desktopRoot, 'scripts/gen-icons.ts'), 'utf8')
+
+    expect(generator).toContain("'apps/web/public/favicon.svg'")
   })
 
   it('builds and stages the complete workspace before local packaging', () => {

@@ -25,7 +25,15 @@ pnpm run package:desktop   # apps/desktop/dist/<platform>/DeepSeek Harness.app
 pnpm run dist:desktop      # apps/desktop/dist/DeepSeek-Harness-<version>-<arch>.dmg
 ```
 
-打包后的应用通过 Electron 的 Node 模式在独立进程中运行暂存的 `@deepseek-ai/dsh` CLI。因此应用保留受监管的 Host 生命周期，而不附带第二个 Node 可执行文件。暂存的 CLI 入口或 Web 前端入口缺失时，`afterPack` 检查拒绝该包。macOS 与 Windows 都使用纳入版本管理的 `apps/desktop/build/icon.png` 原图；仓库不预处理也不提交分平台的图标变体。
+打包后的应用通过 Electron 的 Node 模式在独立进程中运行暂存的 `@deepseek-ai/dsh` CLI。因此应用保留受监管的 Host 生命周期，而不附带第二个 Node 可执行文件。暂存的 CLI 入口或 Web 前端入口缺失时，`afterPack` 检查拒绝该包。
+
+macOS 与 Windows 都使用纳入版本管理的 `apps/desktop/build/icon.png` 原图；仓库不提交分平台的图标变体。该图标与两张托盘模板图渲染自 `apps/web/public/favicon.svg`——侧边栏与浏览器标签页已经在用的那条鱼，使同一个形状在各处标识该产品：
+
+```sh
+node --import tsx apps/desktop/scripts/gen-icons.ts
+```
+
+应用图标把该标记置于 macOS 期望的白色圆角底板上；托盘模板图保持黑色加透明底，这正是 macOS 能为深色菜单栏反转它们的前提。重新生成会改变 `tests/packaging-config.spec.ts` 钉住的摘要，因此非预期的图标替换会在那里失败。
 
 每条需要 Electron 的命令都先重跑一次其幂等的二进制解包。pnpm 只在包首次安装时执行该解包，解包产物被删除后不会再执行，因此丢失产物的目录树否则只会在打包时才失败。
 
