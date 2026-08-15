@@ -26,6 +26,7 @@ import {
 import { provideCmdline } from '@deepseek-ai/dsh-cmdline'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
+import { toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
 import type WebServer from '@deepseek-ai/dsh-host-webserver'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
@@ -135,6 +136,18 @@ export interface DesktopHost {
    * to the proxy alone answers 404 for every Typert channel.
    */
   routes: StubWebServer
+  /**
+   * Direct entry to the API proxy, for the two event-stream paths only.
+   *
+   * The `/api` route deliberately answers 426 to an ordinary GET on
+   * `events.mux` / `events.host`: in a browser those streams are WebSocket
+   * downlinks, and the route offers no SSE fallback. The desktop carrier has
+   * no WebSocket — its streams ride the response body — so those two paths
+   * must reach the proxy's SSE codec directly. Sending them through the route
+   * would leave the renderer with no event stream at all, which presents as a
+   * UI that accepts a prompt and then shows nothing, errors included.
+   */
+  events: typeof fetch
 }
 
 /** What the shell hands the Host at boot. */
@@ -206,10 +219,11 @@ export async function startHost(options: StartHostOptions): Promise<DesktopHost>
     provideCmdline(hostCtx, { args: [], exit: options.exit })
   })
 
-  if (ctx.get('apiProxy') === undefined) {
+  const apiProxy = ctx.get('apiProxy')
+  if (apiProxy === undefined) {
     await ctx.fiber.dispose()
     throw new Error(`${NAME}-desktop: profile "${profileName}" mounted no apiProxy; the desktop surface needs the API plane`)
   }
 
-  return { ctx, routes: assets }
+  return { ctx, routes: assets, events: toFetchHandler(apiProxy).fetch }
 }

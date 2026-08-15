@@ -6,15 +6,15 @@
  * tear the Host down — agent work outlives the window, and only an explicit
  * quit disposes the context.
  *
- * `DSH_DESKTOP_SELFTEST=1` boots the Host, reports whether its RPC surface
- * answers, and exits — the M0 acceptance path, which needs no display.
+ * `DSH_DESKTOP_SELFTEST=1` runs the acceptance probes in `selftest.ts` and
+ * exits instead of opening the window.
  */
 
 import { app, BrowserWindow, protocol } from 'electron'
-import { writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { startHost, type DesktopHost } from './host.ts'
 import { registerFetchBridge } from './ipc-fetch.ts'
+import { captureWindow, probeConversation, probeIpcCarrier, probeRpcSurface, probeUiConversation } from './selftest.ts'
 
 /** The profile this shell boots. */
 const PROFILE = process.env.DSH_DESKTOP_PROFILE ?? 'web'
@@ -30,6 +30,13 @@ const APP_SCHEME = 'dsh'
 
 /** The page the shell opens; the path is what the static fallback serves. */
 const APP_URL = `${APP_SCHEME}://app/index.html`
+
+/**
+ * The downlink paths that bypass the `/api` route. Mirrors `MUX_EVENTS_PATH`
+ * and `HOST_EVENTS_PATH` in the connection package, which are wire constants
+ * rather than configuration.
+ */
+const EVENT_STREAM_PATHS = new Set(['/api/events.mux', '/api/events.host'])
 
 /** Live Host for this process; `undefined` until the boot settles. */
 let host: DesktopHost | undefined
@@ -89,101 +96,6 @@ function reportBootFailure(error: unknown, depth = 0): void {
   console.error(`${indent}${String(error)}`)
 }
 
-/**
- * Probe the booted Host through its own RPC surface, exactly as the renderer
- * will: an unroutable method must come back as a structured refusal rather
- * than a crash, which proves the Fetch entry is wired to the API plane.
- * @param booted - the booted Host.
- * @returns the probe's HTTP status.
- */
-async function probeRpcSurface(booted: DesktopHost): Promise<number> {
-  const response = await booted.routes.dispatch(new Request('http://127.0.0.1/api/host.describe', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', host: '127.0.0.1' },
-    body: JSON.stringify({ type: 'client-request', rpcId: 'selftest-0', method: 'host.describe', payload: {} }),
-  }))
-  return response.status
-}
-
-/**
- * Drive one request from a real renderer through the whole IPC carrier —
- * preload bridge, main-process dispatch, Host, and the streamed response back.
- * Probing the Host's Fetch entry directly would skip every part that is new.
- * @returns the transcript of sink callbacks the renderer observed.
- */
-async function probeIpcCarrier(): Promise<unknown> {
-  const probe = new BrowserWindow({
-    show: false,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: PRELOAD },
-  })
-  try {
-    await probe.loadURL('about:blank')
-    return await probe.webContents.executeJavaScript(`new Promise((resolve) => {
-      const seen = []
-      const decoder = new TextDecoder()
-      window.dshDesktop.fetch(
-        {
-          url: 'http://desktop.invalid/api/host.describe',
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ type: 'client-request', rpcId: 'ipc-selftest', method: 'host.describe', payload: {} }),
-        },
-        {
-          head: (status) => { seen.push('head:' + status) },
-          chunk: (bytes) => { seen.push('chunk:' + decoder.decode(bytes).slice(0, 60)) },
-          end: () => { resolve(seen) },
-          error: (message) => { resolve(seen.concat('error:' + message)) },
-        },
-      )
-    })`)
-  } finally {
-    probe.destroy()
-  }
-}
-
-/**
- * Load the real page and write a screenshot, then exit. The acceptance
- * question for the browser roster is whether it renders at all under this
- * carrier, and only a painted window answers it.
- * @param target - file path for the PNG.
- * @returns a short report of what the page settled into.
- */
-async function captureWindow(target: string): Promise<string> {
-  const window = createWindow()
-  // Renderer diagnostics are the only account of a bundle that failed to load;
-  // without them a stuck loading page reports nothing at all.
-  const problems: string[] = []
-  window.webContents.on('console-message', (event) => {
-    if (event.level === 'error' || event.level === 'warning') problems.push(event.message.slice(0, 200))
-  })
-  window.webContents.on('did-fail-load', (_event, code, description, url) => {
-    problems.push(`did-fail-load ${String(code)} ${description} ${url}`)
-  })
-  await new Promise<void>((resolve) => { window.webContents.once('did-finish-load', () => { resolve() }) })
-  // The shell boots in two stages — module prefetch, then the loader tree — and
-  // only flips to the real UI once every fiber is active. Poll for the settled
-  // marker rather than guessing a delay.
-  const settled = await window.webContents.executeJavaScript(`new Promise((resolve) => {
-    const deadline = Date.now() + 30000
-    const tick = () => {
-      const root = document.getElementById('root')
-      const text = root === null ? '' : root.innerText.slice(0, 200)
-      const painted = root !== null && root.childElementCount > 0
-      if (painted && !text.includes('Loading') && !text.includes('加载')) return resolve({ ok: true, text })
-      if (Date.now() > deadline) return resolve({ ok: false, text })
-      setTimeout(tick, 250)
-    }
-    tick()
-  })`) as { ok: boolean; text: string }
-
-  const image = await window.webContents.capturePage()
-  await writeFile(target, image.toPNG())
-  window.destroy()
-  const report = `${settled.ok ? 'settled' : 'TIMED OUT'} — ${JSON.stringify(settled.text.replaceAll('\n', ' ').slice(0, 160))}`
-  if (problems.length === 0) return report
-  return `${report}\n  renderer problems:\n${problems.slice(0, 12).map(line => `    - ${line}`).join('\n')}`
-}
-
 /** Boot the Host, then either self-test and exit or open the shell window. */
 async function main(): Promise<void> {
   const selftest = process.env.DSH_DESKTOP_SELFTEST === '1'
@@ -192,8 +104,16 @@ async function main(): Promise<void> {
   // Both carriers drive the same route table: the protocol serves the frontend
   // and its plugin bundles, the IPC bridge carries `/api`. Registered after the
   // boot so a request can never arrive before the roster claimed its routes.
-  const routes = host.routes
-  const disposeBridge = registerFetchBridge(request => routes.dispatch(request))
+  const { routes, events } = host
+  const disposeBridge = registerFetchBridge(request => (
+    // The two event-stream paths must reach the proxy's SSE codec directly:
+    // the `/api` route answers 426 to a plain GET on them, because in a
+    // browser they are WebSocket downlinks. Everything else goes through the
+    // route for its fence and Typert interceptor.
+    EVENT_STREAM_PATHS.has(new URL(request.url).pathname)
+      ? events(request)
+      : routes.dispatch(request)
+  ))
   disposeFetchBridge = disposeBridge
   protocol.handle(APP_SCHEME, request => routes.dispatch(request))
   console.log(`dsh-desktop: host booted from profile "${PROFILE}" in ${String(Date.now() - started)}ms`)
@@ -201,15 +121,29 @@ async function main(): Promise<void> {
   if (selftest) {
     const status = await probeRpcSurface(host)
     console.log(`dsh-desktop: /api/host.describe answered ${String(status)}`)
-    const transcript = await probeIpcCarrier()
+    const transcript = await probeIpcCarrier(PRELOAD)
     console.log(`dsh-desktop: IPC carrier transcript ${JSON.stringify(transcript)}`)
     const carrierOk = Array.isArray(transcript)
       && transcript.some(entry => entry === 'head:200')
       && transcript.some(entry => typeof entry === 'string' && entry.startsWith('chunk:'))
     console.log(`dsh-desktop: IPC carrier ${carrierOk ? 'OK' : 'FAILED'}`)
+    if (process.env.DSH_DESKTOP_PROBE_UI === '1') {
+      try {
+        for (const line of await probeUiConversation(createWindow, '/tmp/dsh-desktop-chat.png')) console.log(`dsh-desktop: ui | ${line}`)
+      } catch (error) {
+        console.error('dsh-desktop: UI probe failed —', error instanceof Error ? error.message : error)
+      }
+    }
+    if (process.env.DSH_DESKTOP_PROBE_CHAT === '1') {
+      try {
+        for (const line of await probeConversation(host)) console.log(`dsh-desktop: ${line}`)
+      } catch (error) {
+        console.error('dsh-desktop: conversation probe failed —', error instanceof Error ? error.message : error)
+      }
+    }
     const capturePath = process.env.DSH_DESKTOP_CAPTURE
     if (capturePath !== undefined && capturePath !== '') {
-      console.log(`dsh-desktop: window ${await captureWindow(capturePath)}`)
+      console.log(`dsh-desktop: window ${await captureWindow(createWindow, capturePath)}`)
       console.log(`dsh-desktop: screenshot written to ${capturePath}`)
     }
     disposeBridge()
