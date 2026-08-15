@@ -73,22 +73,21 @@ describe('platform response tracking', () => {
 
     expect(tracker.observe('r1', 'https://platform.deepseek.com/api/v0/users/create_api_key')).toBe(true)
     expect(tracker.observe('r2', 'https://platform.deepseek.com/static/app.js')).toBe(false)
-    expect(tracker.size).toBe(1)
 
     // The body is read at loadingFinished, which claims the request.
     expect(tracker.claim('r1')).toBe('https://platform.deepseek.com/api/v0/users/create_api_key')
     expect(tracker.claim('r1')).toBeUndefined()
     expect(tracker.claim('r2')).toBeUndefined()
-    expect(tracker.size).toBe(0)
   })
 
   it('bounds itself when responses never report completion', () => {
     const tracker = createResponseTracker('/api/v0/')
     for (let i = 0; i < 200; i += 1) tracker.observe(`r${String(i)}`, `https://platform.deepseek.com/api/v0/x/${String(i)}`)
 
-    expect(tracker.size).toBe(64)
     // The oldest were evicted; the newest survive.
     expect(tracker.claim('r0')).toBeUndefined()
+    expect(tracker.claim('r135')).toBeUndefined()
+    expect(tracker.claim('r136')).toBe('https://platform.deepseek.com/api/v0/x/136')
     expect(tracker.claim('r199')).toBe('https://platform.deepseek.com/api/v0/x/199')
   })
 })

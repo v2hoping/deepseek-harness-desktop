@@ -89,8 +89,6 @@ export function createReadinessParser(): ReadinessParser {
 
 /** Child process operations the supervisor owns. */
 export interface HostChild {
-  /** Operating-system process id, absent when the spawn itself failed. */
-  readonly pid?: number
   /** Standard output carrying the readiness line. */
   readonly stdout: { onData(listener: (chunk: string) => void): () => void }
   /** Standard error carrying startup diagnostics. */
@@ -315,7 +313,6 @@ export function spawnDshWeb(options: SpawnDshWebOptions): HostChild {
 /** Adapt Node's event overloads to the supervisor's explicit ownership API. */
 function nodeChildAdapter(child: ChildProcessByStdio<null, Readable, Readable>): HostChild {
   return {
-    ...(child.pid === undefined ? {} : { pid: child.pid }),
     stdout: streamAdapter(child.stdout),
     stderr: streamAdapter(child.stderr),
     onExit(listener) {

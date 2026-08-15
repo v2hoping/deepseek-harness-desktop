@@ -24,8 +24,6 @@ export interface ResponseTracker {
    * @returns The recorded URL, or `undefined` when the request was not tracked.
    */
   claim(requestId: string): string | undefined
-  /** Requests recorded but not yet claimed. */
-  readonly size: number
 }
 
 /**
@@ -60,6 +58,5 @@ export function createResponseTracker(urlFilter: string): ResponseTracker {
       pending.delete(requestId)
       return url
     },
-    get size() { return pending.size },
   }
 }
