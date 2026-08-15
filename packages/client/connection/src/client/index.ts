@@ -1,13 +1,14 @@
 /**
- * Browser wire client. The plugin selects fixture or HTTP transport, provides
- * the shared API client, and lets the runtime object layer start the stream
- * controller with its sinks.
+ * Browser wire client. The plugin selects the transport for the page it runs
+ * in — fixture, desktop IPC, or HTTP — provides the shared API client, and
+ * lets the runtime object layer start the stream controller with its sinks.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { HostDescription, IApiClient } from './api.ts'
 import { ConnectionController, type ConnectionConfig, type ConnectionSinks, type ConnectionState } from './connection.ts'
 import { FixtureApiClient } from './fixture.ts'
 import { WebApiClient } from './web-api-client.ts'
+import { createIpcFetch, IpcApiClient, type DesktopFetchBridge } from './ipc-api-client.ts'
 import { createWebConnectionRpc } from './rpc.ts'
 import { isLoopbackHostname } from '../loopback-hostname.ts'
 import type { ClientConnectionRpc } from '../rpc.ts'
@@ -85,8 +86,13 @@ export function apply(ctx: Context): void {
   const pageLocation = typeof location === 'undefined' ? undefined : location
   const fixture = pageLocation !== undefined && new URLSearchParams(pageLocation.search).has('fixture')
   const fixtureClient = fixture ? new FixtureApiClient() : undefined
-  const api: IApiClient = fixtureClient ?? new WebApiClient()
-  const rpc = fixtureClient?.rpc ?? createWebConnectionRpc()
+  // The desktop shell installs its request bridge on the page before any
+  // plugin loads; its absence is what makes this an ordinary browser page.
+  const desktop = (globalThis as { dshDesktop?: DesktopFetchBridge }).dshDesktop
+  const api: IApiClient = fixtureClient
+    ?? (desktop === undefined ? new WebApiClient() : new IpcApiClient(desktop))
+  const rpc = fixtureClient?.rpc
+    ?? createWebConnectionRpc(desktop === undefined ? undefined : createIpcFetch(desktop))
   let started = false
   let description: HostDescription | undefined
   const descriptionListeners = new Set<() => void>()

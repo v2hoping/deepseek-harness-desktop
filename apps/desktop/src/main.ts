@@ -10,13 +10,26 @@
  * answers, and exits — the M0 acceptance path, which needs no display.
  */
 
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, protocol } from 'electron'
+import { writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { startHost, type DesktopHost } from './host.ts'
 import { registerFetchBridge } from './ipc-fetch.ts'
 
 /** The profile this shell boots. */
 const PROFILE = process.env.DSH_DESKTOP_PROFILE ?? 'web'
+
+/**
+ * Scheme the renderer loads from. A custom scheme rather than `file://`: the
+ * frontend is a single-page application whose asset and plugin requests are
+ * root-absolute paths, and it is the Host's own route table that answers them.
+ * Registering it as standard and secure gives the page an ordinary origin, so
+ * the platform treats it like any https document for storage and fetch.
+ */
+const APP_SCHEME = 'dsh'
+
+/** The page the shell opens; the path is what the static fallback serves. */
+const APP_URL = `${APP_SCHEME}://app/index.html`
 
 /** Live Host for this process; `undefined` until the boot settles. */
 let host: DesktopHost | undefined
@@ -37,7 +50,7 @@ const PRELOAD = fileURLToPath(new URL('./preload.cjs', import.meta.url))
  * @returns the created window.
  */
 function createWindow(): BrowserWindow {
-  return new BrowserWindow({
+  const window = new BrowserWindow({
     width: 1280,
     height: 860,
     show: true,
@@ -49,6 +62,8 @@ function createWindow(): BrowserWindow {
       preload: PRELOAD,
     },
   })
+  void window.loadURL(APP_URL)
+  return window
 }
 
 /**
@@ -82,11 +97,11 @@ function reportBootFailure(error: unknown, depth = 0): void {
  * @returns the probe's HTTP status.
  */
 async function probeRpcSurface(booted: DesktopHost): Promise<number> {
-  const response = await booted.fetch(new URL('http://desktop.invalid/api/host.describe'), {
+  const response = await booted.routes.dispatch(new Request('http://127.0.0.1/api/host.describe', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ rpcId: 'selftest-0', payload: {} }),
-  })
+    headers: { 'content-type': 'application/json', host: '127.0.0.1' },
+    body: JSON.stringify({ type: 'client-request', rpcId: 'selftest-0', method: 'host.describe', payload: {} }),
+  }))
   return response.status
 }
 
@@ -126,13 +141,61 @@ async function probeIpcCarrier(): Promise<unknown> {
   }
 }
 
+/**
+ * Load the real page and write a screenshot, then exit. The acceptance
+ * question for the browser roster is whether it renders at all under this
+ * carrier, and only a painted window answers it.
+ * @param target - file path for the PNG.
+ * @returns a short report of what the page settled into.
+ */
+async function captureWindow(target: string): Promise<string> {
+  const window = createWindow()
+  // Renderer diagnostics are the only account of a bundle that failed to load;
+  // without them a stuck loading page reports nothing at all.
+  const problems: string[] = []
+  window.webContents.on('console-message', (event) => {
+    if (event.level === 'error' || event.level === 'warning') problems.push(event.message.slice(0, 200))
+  })
+  window.webContents.on('did-fail-load', (_event, code, description, url) => {
+    problems.push(`did-fail-load ${String(code)} ${description} ${url}`)
+  })
+  await new Promise<void>((resolve) => { window.webContents.once('did-finish-load', () => { resolve() }) })
+  // The shell boots in two stages — module prefetch, then the loader tree — and
+  // only flips to the real UI once every fiber is active. Poll for the settled
+  // marker rather than guessing a delay.
+  const settled = await window.webContents.executeJavaScript(`new Promise((resolve) => {
+    const deadline = Date.now() + 30000
+    const tick = () => {
+      const root = document.getElementById('root')
+      const text = root === null ? '' : root.innerText.slice(0, 200)
+      const painted = root !== null && root.childElementCount > 0
+      if (painted && !text.includes('Loading') && !text.includes('加载')) return resolve({ ok: true, text })
+      if (Date.now() > deadline) return resolve({ ok: false, text })
+      setTimeout(tick, 250)
+    }
+    tick()
+  })`) as { ok: boolean; text: string }
+
+  const image = await window.webContents.capturePage()
+  await writeFile(target, image.toPNG())
+  window.destroy()
+  const report = `${settled.ok ? 'settled' : 'TIMED OUT'} — ${JSON.stringify(settled.text.replaceAll('\n', ' ').slice(0, 160))}`
+  if (problems.length === 0) return report
+  return `${report}\n  renderer problems:\n${problems.slice(0, 12).map(line => `    - ${line}`).join('\n')}`
+}
+
 /** Boot the Host, then either self-test and exit or open the shell window. */
 async function main(): Promise<void> {
   const selftest = process.env.DSH_DESKTOP_SELFTEST === '1'
   const started = Date.now()
   host = await startHost({ profile: PROFILE, exit: (code) => { app.exit(code) } })
-  const disposeBridge = registerFetchBridge(host.fetch)
+  // Both carriers drive the same route table: the protocol serves the frontend
+  // and its plugin bundles, the IPC bridge carries `/api`. Registered after the
+  // boot so a request can never arrive before the roster claimed its routes.
+  const routes = host.routes
+  const disposeBridge = registerFetchBridge(request => routes.dispatch(request))
   disposeFetchBridge = disposeBridge
+  protocol.handle(APP_SCHEME, request => routes.dispatch(request))
   console.log(`dsh-desktop: host booted from profile "${PROFILE}" in ${String(Date.now() - started)}ms`)
 
   if (selftest) {
@@ -144,6 +207,11 @@ async function main(): Promise<void> {
       && transcript.some(entry => entry === 'head:200')
       && transcript.some(entry => typeof entry === 'string' && entry.startsWith('chunk:'))
     console.log(`dsh-desktop: IPC carrier ${carrierOk ? 'OK' : 'FAILED'}`)
+    const capturePath = process.env.DSH_DESKTOP_CAPTURE
+    if (capturePath !== undefined && capturePath !== '') {
+      console.log(`dsh-desktop: window ${await captureWindow(capturePath)}`)
+      console.log(`dsh-desktop: screenshot written to ${capturePath}`)
+    }
     disposeBridge()
     disposeFetchBridge = undefined
     await host.ctx.fiber.dispose()
@@ -154,6 +222,16 @@ async function main(): Promise<void> {
 
   createWindow()
 }
+
+// Must precede `app.whenReady()`: a scheme's privileges are fixed before the
+// first page loads. `standard` gives the page an ordinary origin (so relative
+// asset paths and storage behave), `secure` puts it on the same footing as
+// https, `stream` allows the streaming bodies event responses need, and
+// `supportFetchAPI` lets page code fetch from it.
+protocol.registerSchemesAsPrivileged([{
+  scheme: APP_SCHEME,
+  privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+}])
 
 // A second launch must reach the running instance rather than boot a second
 // Host over the same session store. The exit is announced: a silent one is

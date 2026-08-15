@@ -15,6 +15,12 @@
   ],
   "references": [
     {
+      "path": "../../vendor/include"
+    },
+    {
+      "path": "../../vendor/loader"
+    },
+    {
       "path": "../../packages/boot/app-boot"
     },
     {
@@ -22,6 +28,9 @@
     },
     {
       "path": "../../packages/host/apiproxy"
+    },
+    {
+      "path": "../../packages/host/webserver"
     },
     {
       "path": "../../packages/util/home-paths"

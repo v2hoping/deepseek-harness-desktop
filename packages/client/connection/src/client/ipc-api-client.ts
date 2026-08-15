@@ -81,17 +81,20 @@ function flattenHeaders(headers: HeadersInit | undefined): Record<string, string
   return flat
 }
 
-/** Desktop platform subclass: one IPC round trip per request, streaming body included. */
-export class IpcApiClient extends AbstractApiClient {
-  /**
-   * @param bridge - the shell's request face.
-   * @param timeoutMs - optional unary timeout override.
-   */
-  constructor(private readonly bridge: DesktopFetchBridge, timeoutMs?: number) {
-    super(timeoutMs)
-  }
+/**
+ * A fetch-shaped call over the bridge. Narrower than the platform `fetch`:
+ * the connection layer only ever passes a `URL`.
+ */
+export type IpcFetch = (input: URL, init?: RequestInit) => Promise<Response>
 
-  protected doFetch(input: URL, init?: RequestInit): Promise<Response> {
+/**
+ * Build the fetch entry every desktop caller shares — {@link IpcApiClient} for
+ * the typed API plane, and the generic RPC channel caller for the rest.
+ * @param bridge - the shell's request face.
+ * @returns a fetch-shaped function backed by one bridge conversation per call.
+ */
+export function createIpcFetch(bridge: DesktopFetchBridge): IpcFetch {
+  return (input, init) => {
     const signal = init?.signal ?? undefined
     if (signal?.aborted === true) return Promise.reject(abortError(signal))
 
@@ -114,7 +117,7 @@ export class IpcApiClient extends AbstractApiClient {
         cancel() { abort() },
       })
 
-      const abort = this.bridge.fetch({
+      const abort = bridge.fetch({
         url: input.href,
         method: init?.method ?? 'GET',
         headers: flattenHeaders(init?.headers),
@@ -151,6 +154,24 @@ export class IpcApiClient extends AbstractApiClient {
         signal.addEventListener('abort', onAbort, { once: true })
       }
     })
+  }
+}
+
+/** Desktop platform subclass: one IPC round trip per request, streaming body included. */
+export class IpcApiClient extends AbstractApiClient {
+  private readonly ipcFetch: IpcFetch
+
+  /**
+   * @param bridge - the shell's request face.
+   * @param timeoutMs - optional unary timeout override.
+   */
+  constructor(bridge: DesktopFetchBridge, timeoutMs?: number) {
+    super(timeoutMs)
+    this.ipcFetch = createIpcFetch(bridge)
+  }
+
+  protected doFetch(input: URL, init?: RequestInit): Promise<Response> {
+    return this.ipcFetch(input, init)
   }
 }
 
