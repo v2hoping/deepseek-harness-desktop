@@ -38,6 +38,14 @@ macOS 与 Windows 使用同一份纳入版本管理的 `apps/desktop/build/icon.
 
 该包保留自己的编译面而不加入 `tsconfig.host.json`：Electron 类型包声明的浏览器全局不能进入 Host 聚合的程序。`apps/desktop/runtime` 是独立的嵌套工作区成员，使这份仅用于 deploy 的清单留在应用构建与发布族扫描之外。
 
+### Distribution
+
+`dist:desktop` 产出未签名的磁盘映像。由于没有配置 Developer ID 身份，Electron Builder 施加 ad-hoc 签名；在下载隔离属性存在时，macOS 把 ad-hoc 包报告为已损坏而不是开发者未验证，因此 Finder 的"仍要打开"路径与安全设置中的放行都不适用于它。移除该属性是下载来的构建能启动的唯一途径，`apps/desktop/scripts/install.sh` 在复制应用之后就做这件事。
+
+采用磁盘映像作为分发格式，是因为包内含框架符号链接，普通归档会把它们展开；安装脚本用 `ditto` 复制也是同一原因。产物名不含空格，使发布 URL 无需转义。
+
+每个需要 Electron 的入口都重跑一次其幂等的二进制解包。pnpm 只在包首次安装时执行该 postinstall，解包产物被删除后不会再执行，因此丢失产物的工作区否则会在打包时才失败，而不是在安装时。
+
 ### Upstream upgrades
 
 这个 fork 跟进上游的成本就是它改动的九个既有文件，因此 `apps/desktop/scripts/upgrade-from-upstream.ts` 只自动化不含决策的部分。它合并上游 ref，通过重新生成解决 `pnpm-lock.yaml` 与 `THIRD_PARTY_NOTICES.md` 的冲突，并在其它任何冲突上停下，列出需要人处理的路径。随后它重装依赖、刷新生成物、运行桌面闭包检查并打包应用，因此一次完整跑通的运行已经证明该合并可构建。

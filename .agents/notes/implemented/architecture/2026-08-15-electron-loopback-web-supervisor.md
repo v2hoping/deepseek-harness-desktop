@@ -38,6 +38,14 @@ The supervisor presents start/readiness/shutdown facts to the Electron applicati
 
 The package keeps its own compiler face rather than joining `tsconfig.host.json`: the Electron type package declares browser globals that must not reach the Host aggregate's program. `apps/desktop/runtime` is a separate nested workspace member so the deploy-only manifest stays outside application build and release-family scans.
 
+### Distribution
+
+`dist:desktop` produces an unsigned disk image. Electron Builder applies an ad-hoc signature because no Developer ID identity is configured, and macOS reports an ad-hoc bundle as damaged rather than as an unverified developer while the download quarantine attribute is present, so neither Finder's open-anyway path nor the security-settings override applies to it. Removing that attribute is the only way a downloaded build starts, which `apps/desktop/scripts/install.sh` does after copying the application.
+
+A disk image is the distribution format because the bundle contains framework symbolic links that a plain archive flattens; the installer copies with `ditto` for the same reason. The artifact name omits spaces so a release URL needs no escaping.
+
+Every entry that needs Electron re-runs its idempotent binary unpack. pnpm runs that postinstall once when the package is installed and not again after the unpacked binary is removed, so a workspace that lost it would otherwise fail at packaging time instead of at install time.
+
 ### Upstream upgrades
 
 The fork's cost of tracking upstream is the nine existing files it edits, so `apps/desktop/scripts/upgrade-from-upstream.ts` automates only what carries no decision. It merges the upstream ref, resolves conflicts in `pnpm-lock.yaml` and `THIRD_PARTY_NOTICES.md` by regenerating them, and stops on every other conflict with the paths that need a human. It then reinstalls, refreshes generated files, runs the desktop closure check, and packages the application, so a completed run has already proven the merge builds.

@@ -13,8 +13,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tests/tsconfig.json",
-    "dev": "pnpm --workspace-root run build && electron .",
-    "package": "pnpm --workspace-root run build && node --import tsx scripts/stage-runtime.ts && electron-builder --dir"
+    "ensure-electron": "node node_modules/electron/install.js",
+    "dev": "pnpm --workspace-root run build && pnpm run ensure-electron && electron .",
+    "package": "pnpm --workspace-root run build && pnpm run ensure-electron && node --import tsx scripts/stage-runtime.ts && electron-builder --dir",
+    "dist": "pnpm --workspace-root run build && pnpm run ensure-electron && node --import tsx scripts/stage-runtime.ts && electron-builder"
   },
   "license": "MIT",
   "devDependencies": {
@@ -49,11 +51,12 @@
         "to": "host/node_modules"
       }
     ],
+    "artifactName": "DeepSeek-Harness-${version}-${arch}.${ext}",
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.png",
       "target": [
-        "dir"
+        "dmg"
       ]
     },
     "win": {

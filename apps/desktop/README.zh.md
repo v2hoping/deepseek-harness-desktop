@@ -18,13 +18,32 @@ pnpm run dev:desktop
 
 ## 打包
 
-本地打包命令执行完整的仓库构建、暂存 Host 闭合的生产依赖树，并为当前平台生成未压缩的应用目录。不需要另行手工构建：
+两条命令共用完整的仓库构建与 Host 依赖暂存，因此不需要另行手工构建。`package:desktop` 生成用于本地验证的未压缩应用目录；`dist:desktop` 生成可分发的 macOS 磁盘映像：
 
 ```sh
-pnpm run package:desktop
+pnpm run package:desktop   # apps/desktop/dist/<platform>/DeepSeek Harness.app
+pnpm run dist:desktop      # apps/desktop/dist/DeepSeek-Harness-<version>-<arch>.dmg
 ```
 
 打包后的应用通过 Electron 的 Node 模式在独立进程中运行暂存的 `@deepseek-ai/dsh` CLI。因此应用保留受监管的 Host 生命周期，而不附带第二个 Node 可执行文件。暂存的 CLI 入口或 Web 前端入口缺失时，`afterPack` 检查拒绝该包。macOS 与 Windows 都使用纳入版本管理的 `apps/desktop/build/icon.png` 原图；仓库不预处理也不提交分平台的图标变体。
+
+每条需要 Electron 的命令都先重跑一次其幂等的二进制解包。pnpm 只在包首次安装时执行该解包，解包产物被删除后不会再执行，因此丢失产物的目录树否则只会在打包时才失败。
+
+## 安装
+
+磁盘映像未签名。它携带 ad-hoc 签名，而 macOS 在下载隔离属性存在时把 ad-hoc 包报告为已损坏，因此移除该属性是启动它的唯一途径。`scripts/install.sh` 完成整套安装：
+
+```sh
+apps/desktop/scripts/install.sh ~/Downloads/DeepSeek-Harness-0.1.0-rc.5-arm64.dmg
+```
+
+不带参数时，它从 `DSH_DESKTOP_REPO` 的 GitHub releases 中解析出适配本机架构的最新磁盘映像。它挂载映像，用 `ditto` 复制应用——因为包内含框架符号链接，普通归档会把它们展开——移除隔离属性，然后卸载。
+
+在 Finder 中把应用拖进 Applications 同样可行，之后执行同一条属性移除命令：
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness.app"
+```
 
 ## 跟进上游
 

@@ -18,13 +18,32 @@ The desktop app accepts only the readiness URL emitted by `dsh web` for `127.0.0
 
 ## Packaging
 
-The local packaging command performs the complete repository build, stages the Host's closed production dependency tree, and creates an unpacked application for the current platform. A separate manual build is not required:
+Two commands share the complete repository build and the Host dependency staging, so a separate manual build is not required. `package:desktop` creates an unpacked application for local verification; `dist:desktop` creates the distributable macOS disk image:
 
 ```sh
-pnpm run package:desktop
+pnpm run package:desktop   # apps/desktop/dist/<platform>/DeepSeek Harness.app
+pnpm run dist:desktop      # apps/desktop/dist/DeepSeek-Harness-<version>-<arch>.dmg
 ```
 
 Packaged applications run the staged `@deepseek-ai/dsh` CLI in a separate process through Electron's Node mode. The application therefore retains the supervised-Host lifecycle without shipping a second Node executable. An `afterPack` check rejects the package when the staged CLI entry or Web frontend entry is absent. Both macOS and Windows use the exact tracked `apps/desktop/build/icon.png` source; the repository does not preprocess or commit platform-specific icon variants.
+
+Every command that needs Electron re-runs its idempotent binary unpack first. pnpm performs that unpack once when the package is installed and not again after the unpacked binary is removed, so a tree that lost it would otherwise fail only at packaging time.
+
+## Installing
+
+The disk image is unsigned. It carries an ad-hoc signature, and macOS reports an ad-hoc bundle as damaged while the download quarantine attribute is present, which leaves removing that attribute as the only way to start it. `scripts/install.sh` performs the complete installation:
+
+```sh
+apps/desktop/scripts/install.sh ~/Downloads/DeepSeek-Harness-0.1.0-rc.5-arm64.dmg
+```
+
+Without an argument it resolves the newest disk image for this Mac's architecture from the GitHub releases of `DSH_DESKTOP_REPO`. It mounts the image, copies the application with `ditto` because the bundle contains framework symbolic links that a plain archive would flatten, removes the quarantine attribute, and unmounts.
+
+Dragging the application to Applications in Finder works as well, followed by the same attribute removal:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/DeepSeek Harness.app"
+```
 
 ## Upstream upgrades
 

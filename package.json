@@ -143,6 +143,7 @@
     "dev:web": "tsx scripts/dev-web.ts --poll",
     "dev:desktop": "pnpm --filter @deepseek-ai/dsh-desktop run dev",
     "package:desktop": "pnpm --filter @deepseek-ai/dsh-desktop run package",
+    "dist:desktop": "pnpm --filter @deepseek-ai/dsh-desktop run dist",
     "upgrade:desktop": "tsx apps/desktop/scripts/upgrade-from-upstream.ts",
     "postinstall": "node scripts/install-lefthook.mjs"
   },
