@@ -11,13 +11,24 @@
  */
 
 import { app, BrowserWindow } from 'electron'
+import { fileURLToPath } from 'node:url'
 import { startHost, type DesktopHost } from './host.ts'
+import { registerFetchBridge } from './ipc-fetch.ts'
 
 /** The profile this shell boots. */
 const PROFILE = process.env.DSH_DESKTOP_PROFILE ?? 'web'
 
 /** Live Host for this process; `undefined` until the boot settles. */
 let host: DesktopHost | undefined
+
+/** Removes the IPC fetch listeners; `undefined` until the Host is up. */
+let disposeFetchBridge: (() => void) | undefined
+
+/**
+ * The preload script, resolved beside this module. `.cjs` because a sandboxed
+ * preload is loaded as CommonJS whatever the package `type` says.
+ */
+const PRELOAD = fileURLToPath(new URL('./preload.cjs', import.meta.url))
 
 /**
  * Create the shell window. The renderer stays blank until the client bundle
@@ -35,6 +46,7 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      preload: PRELOAD,
     },
   })
 }
@@ -78,19 +90,65 @@ async function probeRpcSurface(booted: DesktopHost): Promise<number> {
   return response.status
 }
 
+/**
+ * Drive one request from a real renderer through the whole IPC carrier —
+ * preload bridge, main-process dispatch, Host, and the streamed response back.
+ * Probing the Host's Fetch entry directly would skip every part that is new.
+ * @returns the transcript of sink callbacks the renderer observed.
+ */
+async function probeIpcCarrier(): Promise<unknown> {
+  const probe = new BrowserWindow({
+    show: false,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: PRELOAD },
+  })
+  try {
+    await probe.loadURL('about:blank')
+    return await probe.webContents.executeJavaScript(`new Promise((resolve) => {
+      const seen = []
+      const decoder = new TextDecoder()
+      window.dshDesktop.fetch(
+        {
+          url: 'http://desktop.invalid/api/host.describe',
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ type: 'client-request', rpcId: 'ipc-selftest', method: 'host.describe', payload: {} }),
+        },
+        {
+          head: (status) => { seen.push('head:' + status) },
+          chunk: (bytes) => { seen.push('chunk:' + decoder.decode(bytes).slice(0, 60)) },
+          end: () => { resolve(seen) },
+          error: (message) => { resolve(seen.concat('error:' + message)) },
+        },
+      )
+    })`)
+  } finally {
+    probe.destroy()
+  }
+}
+
 /** Boot the Host, then either self-test and exit or open the shell window. */
 async function main(): Promise<void> {
   const selftest = process.env.DSH_DESKTOP_SELFTEST === '1'
   const started = Date.now()
   host = await startHost({ profile: PROFILE, exit: (code) => { app.exit(code) } })
+  const disposeBridge = registerFetchBridge(host.fetch)
+  disposeFetchBridge = disposeBridge
   console.log(`dsh-desktop: host booted from profile "${PROFILE}" in ${String(Date.now() - started)}ms`)
 
   if (selftest) {
     const status = await probeRpcSurface(host)
     console.log(`dsh-desktop: /api/host.describe answered ${String(status)}`)
+    const transcript = await probeIpcCarrier()
+    console.log(`dsh-desktop: IPC carrier transcript ${JSON.stringify(transcript)}`)
+    const carrierOk = Array.isArray(transcript)
+      && transcript.some(entry => entry === 'head:200')
+      && transcript.some(entry => typeof entry === 'string' && entry.startsWith('chunk:'))
+    console.log(`dsh-desktop: IPC carrier ${carrierOk ? 'OK' : 'FAILED'}`)
+    disposeBridge()
+    disposeFetchBridge = undefined
     await host.ctx.fiber.dispose()
     host = undefined
-    app.exit(status === 200 ? 0 : 1)
+    app.exit(status === 200 && carrierOk ? 0 : 1)
     return
   }
 
@@ -122,6 +180,8 @@ if (!app.requestSingleInstanceLock()) {
     if (host === undefined) return
     const disposing = host
     host = undefined
+    disposeFetchBridge?.()
+    disposeFetchBridge = undefined
     event.preventDefault()
     void disposing.ctx.fiber.dispose().finally(() => { app.quit() })
   })
