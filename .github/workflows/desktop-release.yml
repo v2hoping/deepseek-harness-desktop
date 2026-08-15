@@ -7,11 +7,12 @@ name: Release desktop
 # the building platform. A macOS-built Windows package would ship macOS
 # binaries.
 #
-# Push a `v*` tag to publish, or dispatch manually to produce a draft whose
-# artifacts can be downloaded and started before anyone else sees them.
+# Push a `desktop-v*` tag to publish, or dispatch manually to produce a draft
+# whose artifacts can be downloaded and started before anyone else sees them.
+# The prefix keeps this release sequence apart from the repository's own.
 on:
   push:
-    tags: ['v*']
+    tags: ['desktop-v*']
   workflow_dispatch:
     inputs:
       draft:
@@ -105,11 +106,11 @@ jobs:
             tag="${GITHUB_REF_NAME}"
             echo "draft=false" >> "$GITHUB_OUTPUT"
           else
-            tag="v$(node -p "require('./apps/desktop/package.json').version")-draft"
+            tag="desktop-v$(node -p "require('./apps/desktop/package.json').version")-draft"
             echo "draft=${{ inputs.draft }}" >> "$GITHUB_OUTPUT"
           fi
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#desktop-v}" >> "$GITHUB_OUTPUT"
 
       - name: Publish release
         env:
