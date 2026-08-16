@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 interface DesktopPackage {
+  readonly private: boolean
   readonly scripts: Readonly<Record<string, string>>
+  readonly version: string
   readonly build: {
     readonly afterPack: string
     readonly artifactName: string
@@ -21,6 +23,7 @@ interface DesktopPackage {
 
 interface RootPackage {
   readonly scripts: Readonly<Record<string, string>>
+  readonly version: string
 }
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -119,6 +122,17 @@ describe('desktop packaging configuration', () => {
       .toBe('pnpm --filter @deepseek-ai/dsh-desktop run dev')
     expect(rootPackage.scripts['package:desktop'])
       .toBe('pnpm --filter @deepseek-ai/dsh-desktop run package')
+  })
+})
+
+describe('release versioning', () => {
+  it('versions the application on its own sequence', () => {
+    // The desktop application is not part of the dsh npm release family, and
+    // its `desktop-v` tags announce their own sequence. Inheriting the
+    // repository version would name a disk image after an upstream prerelease.
+    expect(desktopPackage.version).toBe('0.1.0')
+    expect(desktopPackage.version).not.toBe(rootPackage.version)
+    expect(desktopPackage.private).toBe(true)
   })
 })
 
