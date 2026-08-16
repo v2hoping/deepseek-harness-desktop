@@ -6,7 +6,13 @@
 
 ## 为什么放在这里
 
-这个页面需要 Electron 外壳：DeepSeek 平台没有公开的账户 API，其登录页拒绝被内嵌，其 Key 列表只返回脱敏值，因此可用的 Key 只存在于用户在官方页面执行创建后的那一次响应里。插件因此随桌面应用交付而不进入包层，由 `dsh plugin --profile web add` 作为外部插件装入 profile。
+这个页面需要 Electron 外壳：DeepSeek 平台没有公开的账户 API，其登录页拒绝被内嵌，其 Key 列表只返回脱敏值，因此可用的 Key 只存在于用户在官方页面执行创建后的那一次响应里。插件因此随桌面应用交付而不进入包层。
+
+## 它如何进入一次启动
+
+应用把这个目录复制到 `$DSH_HOME/profiles/node_modules`——Node 从任何 profile 向上查找都会到达的模块回退目录——再以 `dsh web --patch <staged>/cordis.patch.yml` 启动自己的 Host。复制在交付版本变化时重做，因此每次启动组合的都是正在运行的这个应用所交付的插件。
+
+两步都不运行包管理器，因为打包后的应用够不到：从 Finder 或资源管理器启动的 GUI 继承的是不含用户自装 pnpm 的最小 PATH，随附的 Host 也不带包管理器。按启动用 `--patch` 组合还让 profile 清单保持原样，因此来自任何其他安装的 `dsh web` 启动该 profile 的方式与本应用安装前完全一致，并在本应用被移除后继续如此。
 
 ## Key 是怎么来的
 

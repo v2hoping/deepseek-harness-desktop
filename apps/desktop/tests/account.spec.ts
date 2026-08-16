@@ -1,8 +1,9 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
-import { isPluginInstalled } from '../src/account/ensure-plugin.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ensureAccountPlugin, pruneLegacyProfileInstall, stagedPluginDir } from '../src/account/ensure-plugin.ts'
 import { captureApiKey } from '../src/account/key-capture.ts'
 import { createResponseTracker } from '../src/account/response-tracker.ts'
 
@@ -35,34 +36,159 @@ describe('created API key capture', () => {
   })
 })
 
-describe('account plugin installation state', () => {
-  it('reports installed once the profile manifest depends on the plugin', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-profile-'))
-    try {
-      await writeFile(
-        join(dir, 'package.json'),
-        JSON.stringify({ dependencies: { '@deepseek-ai/dsh-desktop-account': 'file:../plugin' } }),
-      )
+/** A Harness home and a plugin source directory, both removed on cleanup. */
+async function withFixture(): Promise<{ home: string; source: string; cleanup: () => Promise<void> }> {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-desktop-'))
+  const home = join(root, 'home')
+  const source = join(root, 'account-plugin')
+  await mkdir(source, { recursive: true })
+  await writeFile(join(source, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-desktop-account', version: '1.0.0' }))
+  await writeFile(join(source, 'cordis.patch.yml'), '- insert:\n    - id: desktop-account\n')
+  await mkdir(join(source, 'lib'), { recursive: true })
+  await writeFile(join(source, 'lib/client.js'), 'client')
+  vi.stubEnv('DSH_HOME', home)
+  return { home, source, cleanup: async () => { await rm(root, { recursive: true, force: true }) } }
+}
 
-      expect(isPluginInstalled(dir)).toBe(true)
+afterEach(() => { vi.unstubAllEnvs() })
+
+describe('account plugin staging', () => {
+  it('stages the plugin where the profile module lookup reaches it and returns its overlay', async () => {
+    const { home, source, cleanup } = await withFixture()
+    try {
+      const patch = ensureAccountPlugin({ pluginDir: source, alwaysRestage: false })
+
+      // One level above every profile, which is where Node's lookup walk from
+      // the profile directory finds it.
+      expect(stagedPluginDir()).toBe(join(home, 'profiles/node_modules/@deepseek-ai/dsh-desktop-account'))
+      expect(patch).toBe(join(stagedPluginDir(), 'cordis.patch.yml'))
+      expect(await readFile(join(stagedPluginDir(), 'lib/client.js'), 'utf8')).toBe('client')
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await cleanup()
     }
   })
 
-  it('reports not installed for a fresh profile, a foreign manifest, and a damaged one', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-profile-'))
+  it('restages when the shipped version moves, and leaves a matching copy alone', async () => {
+    const { source, cleanup } = await withFixture()
     try {
-      expect(isPluginInstalled(dir)).toBe(false)
+      ensureAccountPlugin({ pluginDir: source, alwaysRestage: false })
+      await writeFile(join(stagedPluginDir(), 'lib/client.js'), 'stale')
 
-      await writeFile(join(dir, 'package.json'), JSON.stringify({ dependencies: { other: '1.0.0' } }))
-      expect(isPluginInstalled(dir)).toBe(false)
+      ensureAccountPlugin({ pluginDir: source, alwaysRestage: false })
+      expect(await readFile(join(stagedPluginDir(), 'lib/client.js'), 'utf8')).toBe('stale')
 
-      // A malformed manifest must not throw into desktop startup.
-      await writeFile(join(dir, 'package.json'), '{ not json')
-      expect(isPluginInstalled(dir)).toBe(false)
+      await writeFile(join(source, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-desktop-account', version: '1.1.0' }))
+      ensureAccountPlugin({ pluginDir: source, alwaysRestage: false })
+      expect(await readFile(join(stagedPluginDir(), 'lib/client.js'), 'utf8')).toBe('client')
     } finally {
-      await rm(dir, { recursive: true, force: true })
+      await cleanup()
+    }
+  })
+
+  it('restages an unchanged version when asked, for a launch reading the checkout', async () => {
+    const { source, cleanup } = await withFixture()
+    try {
+      ensureAccountPlugin({ pluginDir: source, alwaysRestage: false })
+      await writeFile(join(source, 'lib/client.js'), 'rebuilt')
+
+      ensureAccountPlugin({ pluginDir: source, alwaysRestage: true })
+      expect(await readFile(join(stagedPluginDir(), 'lib/client.js'), 'utf8')).toBe('rebuilt')
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('never copies an install tree the plugin directory carries', async () => {
+    const { source, cleanup } = await withFixture()
+    try {
+      await mkdir(join(source, 'node_modules/react'), { recursive: true })
+      await writeFile(join(source, 'node_modules/react/index.js'), 'react')
+
+      ensureAccountPlugin({ pluginDir: source, alwaysRestage: false })
+
+      expect(existsSync(join(stagedPluginDir(), 'node_modules'))).toBe(false)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('reports an absent plugin and lets the launch continue without the account page', async () => {
+    const { source, cleanup } = await withFixture()
+    try {
+      await rm(join(source, 'package.json'))
+      const lines: string[] = []
+
+      expect(ensureAccountPlugin({ pluginDir: source, alwaysRestage: false, log: line => lines.push(line) })).toBeUndefined()
+      expect(lines.join('')).toContain('the account page stays unavailable')
+    } finally {
+      await cleanup()
+    }
+  })
+})
+
+describe('legacy profile install cleanup', () => {
+  /** Write a web profile carrying what an earlier `dsh plugin add` left. */
+  async function writeLegacyProfile(home: string): Promise<string> {
+    const dir = join(home, 'profiles/web')
+    await mkdir(join(dir, 'node_modules/@deepseek-ai/dsh-desktop-account'), { recursive: true })
+    await writeFile(join(dir, 'node_modules/@deepseek-ai/dsh-desktop-account/package.json'), '{"version":"0.0.1"}')
+    await writeFile(join(dir, 'package.json'), JSON.stringify({
+      dependencies: { '@deepseek-ai/dsh-desktop-account': 'file:/Users/builder/checkout/plugins/account' },
+      dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-desktop-account'] } },
+    }))
+    return dir
+  }
+
+  it('removes the bundle row, the machine-pinned dependency, and the profile-local copy', async () => {
+    const { home, source, cleanup } = await withFixture()
+    try {
+      const dir = await writeLegacyProfile(home)
+
+      ensureAccountPlugin({ pluginDir: source, alwaysRestage: false })
+
+      const manifest = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')) as {
+        dependencies: Record<string, string>
+        dsh: { profile: { bundles: string[] } }
+      }
+      // A surviving bundle row would compose the plugin a second time on top
+      // of the overlay; a surviving local copy would win the module lookup.
+      expect(manifest.dsh.profile.bundles).toEqual(['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'])
+      expect(manifest.dependencies).toEqual({})
+      expect(existsSync(join(dir, 'node_modules/@deepseek-ai/dsh-desktop-account'))).toBe(false)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('leaves a profile that never carried the plugin byte-identical', async () => {
+    const { home, cleanup } = await withFixture()
+    try {
+      const dir = join(home, 'profiles/web')
+      await mkdir(dir, { recursive: true })
+      const original = JSON.stringify({ dsh: { profile: { bundles: ['@deepseek-ai/dsh-base'] } } }, undefined, 2)
+      await writeFile(join(dir, 'package.json'), original)
+
+      pruneLegacyProfileInstall()
+
+      expect(await readFile(join(dir, 'package.json'), 'utf8')).toBe(original)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('reports a manifest it cannot parse instead of throwing into startup', async () => {
+    const { home, cleanup } = await withFixture()
+    try {
+      const dir = join(home, 'profiles/web')
+      await mkdir(dir, { recursive: true })
+      await writeFile(join(dir, 'package.json'), '{ not json')
+      const lines: string[] = []
+
+      pruneLegacyProfileInstall(line => lines.push(line))
+
+      expect(lines.join('')).toContain('could not clean its earlier profile install')
+    } finally {
+      await cleanup()
     }
   })
 })

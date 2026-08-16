@@ -178,18 +178,18 @@ async function boot(): Promise<void> {
   if (bootQuitPromise !== undefined) return
   const paths = hostPaths()
   assertHostArtifacts(paths)
-  // Before the Host boots: the profile must already carry the account plugin
-  // for its browser half to reach the Settings pages of this launch.
-  ensureAccountPlugin({
-    nodeExecutable: paths.nodeExecutable,
-    cliEntry: paths.cliEntry,
+  // Before the Host boots: the plugin must be staged where the Loader resolves
+  // it, so the overlay below can compose it into this launch. A development
+  // launch reads the checkout, whose version does not move as its source does.
+  const accountPatch = ensureAccountPlugin({
     pluginDir: paths.accountPluginDir,
-    electronRunAsNode: paths.electronRunAsNode,
+    alwaysRestage: !app.isPackaged,
     log: chunk => process.stderr.write(chunk),
   })
   host = createHostSupervisor({
     spawnHost: () => spawnDshWeb({
       ...paths,
+      patches: accountPatch === undefined ? [] : [accountPatch],
       env: {
         ...process.env,
         DSH_DESKTOP: '1',

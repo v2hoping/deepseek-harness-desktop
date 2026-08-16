@@ -1,88 +1,164 @@
 /**
- * Install the account plugin into the Harness profile the desktop Host boots.
+ * Stage the account plugin where the Harness Loader resolves it, and report the
+ * overlay that composes it into one launch.
  *
- * `dsh plugin --profile <name> add` is the supported entry for an out-of-tree
- * plugin: pnpm installs it into the profile directory, where the Loader's
- * bare-specifier resolution reaches it, and the CLI appends packages declaring
- * `dsh.bundle.patch` to the profile's layer stack. Doing it here rather than
- * shipping the plugin in the upstream package tier is what keeps this fork's
- * merge surface at zero for the feature.
+ * The plugin ships inside the application, but the Loader anchors bare plugin
+ * specifiers at the profile directory, so the package must sit in a module
+ * directory the profile's lookup walk reaches. `$DSH_HOME/profiles/node_modules`
+ * is that directory: Node finds it one level above every profile, and the CLI
+ * already maintains it as the installation fallback for in-box bundles.
+ *
+ * Staging copies the directory rather than running `dsh plugin add`, which
+ * forwards to pnpm. A packaged application cannot reach pnpm: a GUI launched
+ * from Finder or Explorer inherits a minimal PATH that excludes a user's own
+ * install, and the staged Host ships no package manager. A copy also outlives
+ * what a symlink would not, since the Windows portable build unpacks to a new
+ * directory on every run and a link into the application would dangle.
+ *
+ * The profile manifest stays out of it. Composing the plugin is the returned
+ * `--patch` overlay's job, so a `dsh web` from a separate installation boots
+ * the same profile exactly as it did before this application was installed.
  */
 
-import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, sep } from 'node:path'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 
-/** The profile `dsh web` boots, and therefore the one the desktop Host uses. */
-const PROFILE = 'web'
-
-/** The plugin package installed into that profile. */
+/** The plugin package staged into the profile module fallback. */
 const PLUGIN_PACKAGE = '@deepseek-ai/dsh-desktop-account'
 
-/** Where the plugin and the CLI live for this launch. */
+/** The plugin's own bundle patch, which inserts its Loader row. */
+const PATCH_FILENAME = 'cordis.patch.yml'
+
+/** The profile the desktop Host boots, and the one an earlier build wrote into. */
+const PROFILE = 'web'
+
+/** Where the plugin and the log sink live for this launch. */
 export interface EnsurePluginOptions {
-  /** Node-compatible executable that runs the CLI. */
-  readonly nodeExecutable: string
-  /** Built dsh CLI entry. */
-  readonly cliEntry: string
-  /** Directory holding the plugin's package.json and built lib. */
+  /** Directory holding the plugin's package.json, built lib, and patch file. */
   readonly pluginDir: string
-  /** Run the Electron executable as its bundled Node runtime. */
-  readonly electronRunAsNode: boolean
+  /**
+   * Copy even when the staged version matches. A development launch reads the
+   * checkout, whose version does not change as its source does.
+   */
+  readonly alwaysRestage: boolean
   /** Receives one line describing what happened. */
   readonly log?: (line: string) => void
 }
 
 /**
- * Whether the profile manifest already depends on the plugin. Reading the
- * manifest keeps an ordinary launch free of a pnpm process.
- * @param profileDir - the profile directory to inspect.
- * @returns `true` when the dependency is already recorded.
+ * Read a package directory's declared version.
+ * @param dir - directory holding a package.json.
+ * @returns the version, or `undefined` when the manifest is absent or unreadable.
  */
-export function isPluginInstalled(profileDir: string): boolean {
-  const manifestPath = join(profileDir, 'package.json')
-  if (!existsSync(manifestPath)) return false
+function readPackageVersion(dir: string): string | undefined {
   try {
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { dependencies?: Record<string, string> }
-    return manifest.dependencies?.[PLUGIN_PACKAGE] !== undefined
+    const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { version?: string }
+    return manifest.version
   } catch {
-    // An unreadable or malformed profile manifest means "not installed"; the
-    // install below rewrites it through the CLI either way.
-    return false
+    // A missing or malformed manifest means "nothing usable is staged here";
+    // the caller restages over it either way.
+    return undefined
   }
 }
 
 /**
- * Install the account plugin unless the profile already carries it.
+ * The directory the plugin is staged into.
+ * @returns the absolute staged package directory.
+ */
+export function stagedPluginDir(): string {
+  return dshHomePath('profiles', 'node_modules', PLUGIN_PACKAGE)
+}
+
+/** Whether a copied path belongs to the plugin rather than to an install tree under it. */
+function isPluginContent(path: string): boolean {
+  return basename(path) !== 'node_modules' && !path.includes(`${sep}node_modules${sep}`)
+}
+
+/**
+ * Remove what an earlier build's `dsh plugin add` wrote into the profile: the
+ * bundle row, the dependency pinning the plugin to a path on the machine that
+ * built it, and the profile-local copy.
+ *
+ * All three have to go. A surviving bundle row composes the plugin a second
+ * time on top of the overlay, and a surviving profile-local copy wins the
+ * module lookup over the staged one, pinning the launch to whatever that
+ * earlier install left behind.
+ * @param log - receives one line when anything was removed.
+ */
+export function pruneLegacyProfileInstall(log?: (line: string) => void): void {
+  const profileDir = dshHomePath('profiles', PROFILE)
+  const manifestPath = join(profileDir, 'package.json')
+  let pruned = false
+  try {
+    if (existsSync(manifestPath)) {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+        dependencies?: Record<string, string>
+        dsh?: { profile?: { bundles?: string[] } }
+      }
+      const profile = manifest.dsh?.profile
+      if (profile?.bundles?.includes(PLUGIN_PACKAGE) === true) {
+        profile.bundles = profile.bundles.filter(entry => entry !== PLUGIN_PACKAGE)
+        pruned = true
+      }
+      const dependencies = manifest.dependencies
+      if (dependencies?.[PLUGIN_PACKAGE] !== undefined) {
+        manifest.dependencies = Object.fromEntries(
+          Object.entries(dependencies).filter(([name]) => name !== PLUGIN_PACKAGE),
+        )
+        pruned = true
+      }
+      if (pruned) writeFileSync(manifestPath, JSON.stringify(manifest, undefined, 2) + '\n')
+    }
+    const local = join(profileDir, 'node_modules', PLUGIN_PACKAGE)
+    if (existsSync(local)) {
+      rmSync(local, { recursive: true, force: true })
+      pruned = true
+    }
+  } catch (error) {
+    // The profile belongs to the CLI, not to this application: a manifest it
+    // cannot rewrite is reported and left alone, and the overlay below still
+    // composes the staged plugin.
+    log?.(`desktop account plugin could not clean its earlier profile install (${String(error)})\n`)
+    return
+  }
+  if (pruned) log?.(`desktop account plugin removed its earlier ${PROFILE}-profile install\n`)
+}
+
+/**
+ * Stage the plugin unless the staged copy already matches, then report its
+ * overlay path.
  *
  * A failure here leaves the Host fully functional without the account page, so
  * it is reported and not thrown: the desktop application must still start.
- * @param options - CLI location, plugin location, and the log sink.
+ * @param options - plugin location, restage policy, and the log sink.
+ * @returns the `--patch` overlay path to compose, or `undefined` when the
+ * plugin is unavailable and the launch must proceed without the account page.
  */
-export function ensureAccountPlugin(options: EnsurePluginOptions): void {
-  const profileDir = dshHomePath('profiles', PROFILE)
-  if (isPluginInstalled(profileDir)) return
-  if (!existsSync(join(options.pluginDir, 'package.json'))) {
-    options.log?.(`desktop account plugin is missing at ${options.pluginDir}; the account page stays unavailable\n`)
-    return
+export function ensureAccountPlugin(options: EnsurePluginOptions): string | undefined {
+  const source = options.pluginDir
+  const version = readPackageVersion(source)
+  if (version === undefined) {
+    options.log?.(`desktop account plugin is missing at ${source}; the account page stays unavailable\n`)
+    return undefined
   }
-
-  const result = spawnSync(
-    options.nodeExecutable,
-    [options.cliEntry, 'plugin', '--profile', PROFILE, 'add', `file:${options.pluginDir}`],
-    {
-      env: options.electronRunAsNode ? { ...process.env, ELECTRON_RUN_AS_NODE: '1' } : process.env,
-      encoding: 'utf8',
-      windowsHide: true,
-    },
-  )
-  if (result.status === 0) {
-    options.log?.(`desktop account plugin installed into the ${PROFILE} profile\n`)
-    return
+  pruneLegacyProfileInstall(options.log)
+  const staged = stagedPluginDir()
+  try {
+    if (options.alwaysRestage || readPackageVersion(staged) !== version) {
+      rmSync(staged, { recursive: true, force: true })
+      mkdirSync(dirname(staged), { recursive: true })
+      cpSync(source, staged, { recursive: true, dereference: true, filter: isPluginContent })
+      options.log?.(`desktop account plugin ${version} staged into ${staged}\n`)
+    }
+  } catch (error) {
+    options.log?.(`desktop account plugin staging failed (${String(error)}); the account page stays unavailable\n`)
+    return undefined
   }
-  options.log?.(
-    `desktop account plugin install failed (${String(result.status ?? result.signal)}); `
-    + `the account page stays unavailable\n${result.stderr}\n`,
-  )
+  const patch = join(staged, PATCH_FILENAME)
+  if (!existsSync(patch)) {
+    options.log?.(`desktop account plugin declares no ${PATCH_FILENAME}; the account page stays unavailable\n`)
+    return undefined
+  }
+  return patch
 }

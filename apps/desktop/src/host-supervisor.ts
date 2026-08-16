@@ -280,6 +280,12 @@ export interface SpawnDshWebOptions {
   readonly env: NodeJS.ProcessEnv
   /** Run the Electron executable as its bundled Node runtime. */
   readonly electronRunAsNode?: boolean
+  /**
+   * Loader patch overlays composed after the profile's own layer, in order.
+   * Composing the desktop-only plugins per launch is what leaves the profile
+   * itself identical for a `dsh web` from any other installation.
+   */
+  readonly patches: readonly string[]
 }
 
 function streamAdapter(stream: NodeJS.ReadableStream): HostChild['stdout'] {
@@ -301,7 +307,11 @@ export function spawnDshWeb(options: SpawnDshWebOptions): HostChild {
   const env = options.electronRunAsNode
     ? { ...options.env, ELECTRON_RUN_AS_NODE: '1' }
     : options.env
-  const child = spawn(options.nodeExecutable, ['--expose-internals', options.cliEntry, 'web', '--host', '127.0.0.1', '--port', '0'], {
+  // `dsh web` passes options through once it meets one it does not own, so its
+  // own --patch has to precede the web app's flags.
+  const overlays = options.patches.flatMap(patch => ['--patch', patch])
+  const args = ['--expose-internals', options.cliEntry, 'web', ...overlays, '--host', '127.0.0.1', '--port', '0']
+  const child = spawn(options.nodeExecutable, args, {
     cwd: options.cwd,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],

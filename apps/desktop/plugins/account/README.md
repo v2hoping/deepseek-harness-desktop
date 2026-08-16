@@ -6,7 +6,13 @@ Adds an Account page to Settings, and a quick path beside the first-run credenti
 
 ## Why it lives here
 
-The page needs the Electron shell: DeepSeek's platform has no public account API, its sign-in page refuses to be framed, and its key listing returns masked values, so a usable key exists only in the response to a creation the user performs on the official page. The plugin therefore ships with the desktop application rather than the package tier, and `dsh plugin --profile web add` installs it into the profile as an out-of-tree bundle.
+The page needs the Electron shell: DeepSeek's platform has no public account API, its sign-in page refuses to be framed, and its key listing returns masked values, so a usable key exists only in the response to a creation the user performs on the official page. The plugin therefore ships with the desktop application rather than the package tier.
+
+## How it reaches a launch
+
+The application stages this directory into `$DSH_HOME/profiles/node_modules`, the module fallback Node's lookup walk reaches from every profile, and then boots its Host with `dsh web --patch <staged>/cordis.patch.yml`. Staging copies the directory and re-copies it whenever the shipped version moves, so a launch always composes the plugin the running application shipped.
+
+Neither step runs a package manager, because a packaged application cannot reach one: a GUI launched from Finder or Explorer inherits a minimal PATH that excludes a user's own pnpm, and the staged Host ships none. Composing per launch through `--patch` also leaves the profile manifest untouched, so a `dsh web` from any other installation boots that profile exactly as it did before this application was installed, and keeps booting it after the application is removed.
 
 ## How a key arrives
 
