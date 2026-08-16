@@ -297,12 +297,45 @@ describe('desktop Host process', () => {
       cwd: '/Users/tester',
       env: { DSH_DESKTOP: '1' },
       electronRunAsNode: true,
+      patches: [],
     })
 
     expect(spawn).toHaveBeenCalledWith(
       '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness',
       ['--expose-internals', expect.stringContaining('/Resources/host/node_modules/@deepseek-ai/dsh/lib/bin.js'), 'web', '--host', '127.0.0.1', '--port', '0'],
       expect.objectContaining({ env: { DSH_DESKTOP: '1', ELECTRON_RUN_AS_NODE: '1' } }),
+    )
+  })
+
+  it('composes patch overlays before the flags the web app owns', async () => {
+    const spawned = {
+      stdout: { on: vi.fn(), off: vi.fn() },
+      stderr: { on: vi.fn(), off: vi.fn() },
+      on: vi.fn(),
+      off: vi.fn(),
+      kill: vi.fn(),
+    }
+    vi.mocked(spawn).mockReturnValue(spawned as never)
+
+    const { spawnDshWeb } = await import('../src/host-supervisor.ts')
+    spawnDshWeb({
+      nodeExecutable: '/usr/bin/node',
+      cliEntry: '/app/bin.js',
+      cwd: '/Users/tester',
+      env: {},
+      patches: ['/home/.dsh/profiles/node_modules/@deepseek-ai/dsh-desktop-account/cordis.patch.yml'],
+    })
+
+    // `dsh web` stops parsing its own options at the first one it does not
+    // own, so --patch after --host would reach the web app as a stray flag.
+    expect(spawn).toHaveBeenCalledWith(
+      '/usr/bin/node',
+      [
+        '--expose-internals', '/app/bin.js', 'web',
+        '--patch', '/home/.dsh/profiles/node_modules/@deepseek-ai/dsh-desktop-account/cordis.patch.yml',
+        '--host', '127.0.0.1', '--port', '0',
+      ],
+      expect.objectContaining({ cwd: '/Users/tester' }),
     )
   })
 })
