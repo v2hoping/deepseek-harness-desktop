@@ -67,7 +67,13 @@ class UpgradeError extends Error {
 
 /** Run one command with inherited output, failing the upgrade on a nonzero exit. */
 function run(command: string, args: readonly string[], guidance: readonly string[] = []): void {
-  const result = spawnSync(command, args, { cwd: repositoryRoot, stdio: 'inherit' })
+  // `shell` on Windows for the same reason as the runtime stager: pnpm is a
+  // `.cmd` there, and Node will not spawn one without a shell.
+  const result = spawnSync(command, args, {
+    cwd: repositoryRoot,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  })
   if (result.error !== undefined) throw new UpgradeError(`${command} could not start: ${result.error.message}`, guidance)
   if (result.status !== 0) {
     throw new UpgradeError(`${command} ${args.join(' ')} exited with ${String(result.status ?? result.signal)}`, guidance)

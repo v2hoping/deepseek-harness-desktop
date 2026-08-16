@@ -15,8 +15,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tests/tsconfig.json",
     "ensure-electron": "node node_modules/electron/install.js",
     "dev": "pnpm --workspace-root run build && pnpm run ensure-electron && electron .",
-    "package": "pnpm --workspace-root run build && pnpm run ensure-electron && node --import tsx scripts/stage-runtime.ts && electron-builder --dir",
-    "dist": "pnpm --workspace-root run build && pnpm run ensure-electron && node --import tsx scripts/stage-runtime.ts && electron-builder"
+    "package": "pnpm --workspace-root run build && pnpm run ensure-electron && node --import tsx scripts/stage-runtime.ts && electron-builder --dir --publish never",
+    "dist": "pnpm --workspace-root run build && pnpm run ensure-electron && node --import tsx scripts/stage-runtime.ts && electron-builder --publish never"
   },
   "license": "MIT",
   "devDependencies": {

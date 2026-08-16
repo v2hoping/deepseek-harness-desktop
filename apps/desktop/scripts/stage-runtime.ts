@@ -20,7 +20,14 @@ interface Manifest {
 
 async function run(command: string, args: readonly string[]): Promise<void> {
   await new Promise<void>((accept, reject) => {
-    const child = spawn(command, args, { cwd: repositoryRoot, env: { ...process.env, CI: 'true' }, stdio: 'inherit' })
+    const child = spawn(command, args, {
+      cwd: repositoryRoot,
+      env: { ...process.env, CI: 'true' },
+      stdio: 'inherit',
+      // Windows resolves pnpm to a `.cmd`, which Node refuses to spawn
+      // directly; every argument here is a repository-owned literal.
+      shell: process.platform === 'win32',
+    })
     child.once('error', reject)
     child.once('exit', (code, signal) => {
       if (code === 0) accept()
