@@ -95,6 +95,10 @@ describe('desktop packaging configuration', () => {
     expect(desktopPackage.build.artifactName).not.toMatch(/\s/u)
     expect(desktopPackage.scripts.dist).toContain('electron-builder')
     expect(desktopPackage.scripts.dist).not.toContain('--dir')
+    // Electron Builder infers a GitHub publish target in CI; this release
+    // uploads its own artifacts, so the packaging step must never publish.
+    expect(desktopPackage.scripts.dist).toContain('--publish never')
+    expect(desktopPackage.scripts.package).toContain('--publish never')
     expect(rootPackage.scripts['dist:desktop'])
       .toBe('pnpm --filter @deepseek-ai/dsh-desktop run dist')
   })
@@ -135,5 +139,16 @@ describe('release matrix', () => {
   it('grants release write only to the publishing job', () => {
     expect(workflow).toContain('permissions:\n  contents: read')
     expect(workflow.split('publish:')[1]).toContain('contents: write')
+  })
+})
+
+describe('cross-platform staging', () => {
+  it('spawns the package manager through a shell on Windows', () => {
+    // Node refuses to spawn a `.cmd` without one since CVE-2024-27980, and
+    // pnpm is a `.cmd` on Windows.
+    for (const file of ['scripts/stage-runtime.ts', 'scripts/upgrade-from-upstream.ts']) {
+      expect(readFileSync(resolve(desktopRoot, file), 'utf8'))
+        .toContain("shell: process.platform === 'win32'")
+    }
   })
 })
