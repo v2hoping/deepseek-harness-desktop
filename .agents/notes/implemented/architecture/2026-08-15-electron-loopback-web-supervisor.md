@@ -44,6 +44,8 @@ The package keeps its own compiler face rather than joining `tsconfig.host.json`
 
 A disk image is the distribution format because the bundle contains framework symbolic links that a plain archive flattens; the installer copies with `ditto` for the same reason. The artifact name omits spaces so a release URL needs no escaping.
 
+The application carries its own version rather than the repository's. It is not a member of the dsh npm release family, and its `desktop-v` tags announce a sequence of their own, so inheriting the repository version would name a disk image after an upstream prerelease that says nothing about this application.
+
 Every entry that needs Electron re-runs its idempotent binary unpack. pnpm runs that postinstall once when the package is installed and not again after the unpacked binary is removed, so a workspace that lost it would otherwise fail at packaging time instead of at install time.
 
 ### Upstream upgrades

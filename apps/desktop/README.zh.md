@@ -44,7 +44,7 @@ node --import tsx apps/desktop/scripts/gen-icons.ts
 磁盘映像未签名。它携带 ad-hoc 签名，而 macOS 在下载隔离属性存在时把 ad-hoc 包报告为已损坏，因此移除该属性是启动它的唯一途径。`scripts/install.sh` 完成整套安装：
 
 ```sh
-apps/desktop/scripts/install.sh ~/Downloads/DeepSeek-Harness-0.1.0-rc.5-arm64.dmg
+apps/desktop/scripts/install.sh ~/Downloads/DeepSeek-Harness-0.1.0-arm64.dmg
 ```
 
 不带参数时，它从 `DSH_DESKTOP_REPO` 的 GitHub releases 中解析出适配本机架构的最新磁盘映像。它挂载映像，用 `ditto` 复制应用——因为包内含框架符号链接，普通归档会把它们展开——移除隔离属性，然后卸载。

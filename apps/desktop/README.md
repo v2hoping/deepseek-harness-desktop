@@ -44,7 +44,7 @@ Every command that needs Electron re-runs its idempotent binary unpack first. pn
 The disk image is unsigned. It carries an ad-hoc signature, and macOS reports an ad-hoc bundle as damaged while the download quarantine attribute is present, which leaves removing that attribute as the only way to start it. `scripts/install.sh` performs the complete installation:
 
 ```sh
-apps/desktop/scripts/install.sh ~/Downloads/DeepSeek-Harness-0.1.0-rc.5-arm64.dmg
+apps/desktop/scripts/install.sh ~/Downloads/DeepSeek-Harness-0.1.0-arm64.dmg
 ```
 
 Without an argument it resolves the newest disk image for this Mac's architecture from the GitHub releases of `DSH_DESKTOP_REPO`. It mounts the image, copies the application with `ditto` because the bundle contains framework symbolic links that a plain archive would flatten, removes the quarantine attribute, and unmounts.
