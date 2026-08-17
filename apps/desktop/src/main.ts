@@ -19,6 +19,7 @@ import { ensureAccountPlugin } from './account/ensure-plugin.ts'
 import { registerAccountIpc } from './account/ipc.ts'
 import { createHostSupervisor, spawnDshWeb, type HostSupervisor } from './host-supervisor.ts'
 import { LOOPBACK_HOST, probeLoopbackOrigin, reserveLoopbackPort } from './loopback.ts'
+import { createStartupLog, type StartupLog } from './startup-log.ts'
 import { createDesktopLifecycle, type DesktopLifecycle } from './window-lifecycle.ts'
 
 const APP_NAME = 'DeepSeek Harness'
@@ -27,6 +28,9 @@ const APP_NAME = 'DeepSeek Harness'
 const HOST_PROBE_TIMEOUT_MS = 2_000
 const WINDOW_WIDTH = 1440
 const WINDOW_HEIGHT = 920
+
+/** Longest a created window stays hidden waiting for its first paint. */
+const WINDOW_REVEAL_TIMEOUT_MS = 15_000
 const DESKTOP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const REPOSITORY_ROOT = resolve(DESKTOP_DIR, '../..')
 
@@ -37,6 +41,7 @@ let lifecycle: DesktopLifecycle | undefined
 let hostOrigin: string | undefined
 let bootQuitPromise: Promise<void> | undefined
 let quitReleased = false
+let startupLog: StartupLog | undefined
 
 /** Resolve artifacts from the checkout in development and resourcesPath when packaged. */
 function hostPaths(): {
@@ -111,6 +116,7 @@ function hardenSession(): void {
 async function createMainWindow(): Promise<BrowserWindow> {
   const origin = hostOrigin
   if (origin === undefined) throw new Error('desktop Host is not ready')
+  startupLog?.step(`creating window for ${origin}`)
   const window = new BrowserWindow({
     width: WINDOW_WIDTH,
     height: WINDOW_HEIGHT,
@@ -143,8 +149,35 @@ async function createMainWindow(): Promise<BrowserWindow> {
     if (isExternalUrl(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
-  await window.loadURL(origin)
-  if (!lifecycle?.isQuitting) window.show()
+  // Showing is driven by the first paint rather than by loadURL settling. A
+  // renderer that is slow to finish every subresource — or a load that never
+  // settles at all — would otherwise leave a created window permanently
+  // invisible, which is indistinguishable from the application not starting.
+  const reveal = (reason: string): void => {
+    if (window.isDestroyed() || window.isVisible() || lifecycle?.isQuitting === true) return
+    startupLog?.step(`showing window (${reason})`)
+    window.show()
+  }
+  window.once('ready-to-show', () => { reveal('ready-to-show') })
+  window.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    startupLog?.step(`renderer load failed: ${String(errorCode)} ${errorDescription} for ${validatedURL}`)
+    reveal('load failed')
+  })
+  const revealTimer = setTimeout(() => { reveal('first-paint timeout') }, WINDOW_REVEAL_TIMEOUT_MS)
+  window.once('closed', () => { clearTimeout(revealTimer) })
+
+  startupLog?.step('loading renderer')
+  try {
+    await window.loadURL(origin)
+    startupLog?.step('renderer loaded')
+  } catch (error) {
+    startupLog?.fail('renderer load', error)
+    reveal('load rejected')
+    throw error
+  } finally {
+    clearTimeout(revealTimer)
+  }
+  reveal('load settled')
   return window
 }
 
@@ -180,20 +213,30 @@ function requestAppQuit(): Promise<void> {
 
 async function boot(): Promise<void> {
   if (bootQuitPromise !== undefined) return
+  // The platform's own log location: ~/Library/Logs/<app> on macOS and
+  // %APPDATA%\<app>\logs on Windows, so a user can find and send it.
+  startupLog = createStartupLog(app.getPath('logs'))
+  const record = (chunk: string): void => {
+    process.stderr.write(chunk)
+    startupLog?.step(`host: ${chunk.trimEnd()}`)
+  }
   const paths = hostPaths()
   assertHostArtifacts(paths)
+  startupLog.step(`artifacts present (packaged=${String(app.isPackaged)}, cli=${paths.cliEntry})`)
   // Before the Host boots: the plugin must be staged where the Loader resolves
   // it, so the overlay below can compose it into this launch. A development
   // launch reads the checkout, whose version does not move as its source does.
   const accountPatch = ensureAccountPlugin({
     pluginDir: paths.accountPluginDir,
     alwaysRestage: !app.isPackaged,
-    log: chunk => process.stderr.write(chunk),
+    log: record,
   })
+  startupLog.step(`account plugin ${accountPatch === undefined ? 'unavailable' : 'staged'}`)
   // The desktop picks the port so it knows the origin to probe before the Host
   // is up; readiness is an HTTP answer, not a line read from the child's stdout.
   const port = await reserveLoopbackPort()
   const origin = `http://${LOOPBACK_HOST}:${String(port)}`
+  startupLog.step(`reserved ${origin}`)
   host = createHostSupervisor({
     spawnHost: () => spawnDshWeb({
       ...paths,
@@ -206,13 +249,16 @@ async function boot(): Promise<void> {
     }),
     origin,
     probeReady: () => probeLoopbackOrigin(origin, HOST_PROBE_TIMEOUT_MS),
-    log: chunk => process.stderr.write(chunk),
+    log: record,
     onUnexpectedExit: ({ code, signal }) => {
+      startupLog?.step(`host exited unexpectedly (code ${String(code)}, signal ${String(signal)})`)
       console.error(`desktop Host exited unexpectedly (code ${String(code)}, signal ${String(signal)})`)
       void requestAppQuit()
     },
   })
+  startupLog.step('spawning host')
   hostOrigin = await host.start()
+  startupLog.step('host answered its origin')
   hardenSession()
   registerAccountIpc()
   lifecycle = createDesktopLifecycle({
@@ -223,7 +269,9 @@ async function boot(): Promise<void> {
     reportError: (error) => { console.error('desktop shutdown failed:', error) },
   })
   createTray()
+  startupLog.step('tray created')
   await lifecycle.showWindow()
+  startupLog.step('startup complete')
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -244,11 +292,15 @@ if (!app.requestSingleInstanceLock()) {
   })
   app.whenReady().then(boot).catch(async (error: unknown) => {
     console.error('desktop startup failed:', error)
+    startupLog?.fail('startup', error)
     if (bootQuitPromise === undefined) {
       await dialog.showMessageBox({
         type: 'error',
         title: `${APP_NAME} failed to start`,
         message: error instanceof Error ? error.message : String(error),
+        // The message alone rarely says which step failed; the log does, and a
+        // user cannot report a file whose location they were never told.
+        ...(startupLog === undefined ? {} : { detail: `Startup log: ${startupLog.path}` }),
       })
     }
     await requestAppQuit()
