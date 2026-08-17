@@ -29,16 +29,26 @@ interface Koffi {
 }
 
 /**
- * Read a NUL-terminated UTF-16 string at a native address. koffi's
- * `_Out_ void **` out-params surface a raw address, and
- * `koffi.decode(addr, 'str16')` would dereference it as a pointer — crash
- * on real Windows — so view the memory directly instead.
+ * Read a NUL-terminated UTF-16 string at a native address.
+ *
+ * koffi's `_Out_ void **` out-params surface a raw address, and
+ * `koffi.decode(addr, 'str16')` would dereference it as a pointer — crash on
+ * real Windows — so the memory is viewed directly. The view must cover exactly
+ * the string and no more: `CoTaskMemAlloc` sizes a path to its own length, so
+ * a fixed-size window spans pages the process never allocated and reading it
+ * is an access violation that kills the worker outright. `lstrlenW` walks to
+ * the terminator the COM contract guarantees, which is what makes the span
+ * knowable before anything is read.
+ * @param koffi - the loaded koffi module.
+ * @param measure - bound `lstrlenW`, returning the length in UTF-16 units.
+ * @param address - the string's native address.
+ * @returns the decoded string, empty when the address holds none.
  */
-function readUtf16(koffi: Koffi, address: unknown): string {
-  const bytes = Buffer.from(koffi.view(address, 32768))
-  let end = 0
-  while (end + 1 < bytes.length && bytes[end] !== 0) end += 2
-  return bytes.toString('utf16le', 0, end)
+export function readUtf16(koffi: Koffi, measure: KoffiFunction, address: unknown): string {
+  const units = Number(measure(address))
+  if (!Number.isFinite(units) || units <= 0) return ''
+  const bytes = Buffer.from(koffi.view(address, units * 2))
+  return bytes.toString('utf16le', 0, units * 2)
 }
 
 const COINIT_APARTMENTTHREADED = 0x2
@@ -99,6 +109,9 @@ export async function loadWin32DialogBindings(): Promise<Win32DialogBindings> {
   const coCreateInstance = ole32.func('__stdcall', 'CoCreateInstance', 'int32', ['void *', 'void *', 'uint32', 'void *', 'void *'])
   const coTaskMemFree = ole32.func('__stdcall', 'CoTaskMemFree', 'void', ['void *'])
   const getCurrentThreadId = kernel32.func('__stdcall', 'GetCurrentThreadId', 'uint32', [])
+  // Takes the address as an opaque pointer: declaring it as a string type
+  // would have koffi marshal a JS value in, not measure the one already there.
+  const lstrlenW = kernel32.func('__stdcall', 'lstrlenW', 'int32', ['void *'])
 
   const protoShow = koffi.proto('int32 __stdcall DshDialogShow(void *self, void *owner)')
   const protoSetOptions = koffi.proto('int32 __stdcall DshDialogSetOptions(void *self, uint32 options)')
@@ -156,7 +169,7 @@ export async function loadWin32DialogBindings(): Promise<Win32DialogBindings> {
             const nameOut: unknown[] = [null]
             const gotName = method(item, SLOT_GET_DISPLAY_NAME, protoGetDisplayName)(SIGDN_FILESYSPATH, nameOut)
             if (gotName < 0) return { hr: gotName }
-            const path = readUtf16(koffi, nameOut[0])
+            const path = readUtf16(koffi, lstrlenW, nameOut[0])
             coTaskMemFree(nameOut[0])
             return { hr: gotName, path }
           } finally {
