@@ -74,7 +74,12 @@
     "win": {
       "icon": "build/icon.png",
       "target": [
-        "portable"
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "linux": {

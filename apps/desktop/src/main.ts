@@ -18,9 +18,13 @@ import {
 import { ensureAccountPlugin } from './account/ensure-plugin.ts'
 import { registerAccountIpc } from './account/ipc.ts'
 import { createHostSupervisor, spawnDshWeb, type HostSupervisor } from './host-supervisor.ts'
+import { LOOPBACK_HOST, probeLoopbackOrigin, reserveLoopbackPort } from './loopback.ts'
 import { createDesktopLifecycle, type DesktopLifecycle } from './window-lifecycle.ts'
 
 const APP_NAME = 'DeepSeek Harness'
+
+/** Per-attempt timeout for one Host readiness probe. */
+const HOST_PROBE_TIMEOUT_MS = 2_000
 const WINDOW_WIDTH = 1440
 const WINDOW_HEIGHT = 920
 const DESKTOP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -186,15 +190,22 @@ async function boot(): Promise<void> {
     alwaysRestage: !app.isPackaged,
     log: chunk => process.stderr.write(chunk),
   })
+  // The desktop picks the port so it knows the origin to probe before the Host
+  // is up; readiness is an HTTP answer, not a line read from the child's stdout.
+  const port = await reserveLoopbackPort()
+  const origin = `http://${LOOPBACK_HOST}:${String(port)}`
   host = createHostSupervisor({
     spawnHost: () => spawnDshWeb({
       ...paths,
       patches: accountPatch === undefined ? [] : [accountPatch],
+      port,
       env: {
         ...process.env,
         DSH_DESKTOP: '1',
       },
     }),
+    origin,
+    probeReady: () => probeLoopbackOrigin(origin, HOST_PROBE_TIMEOUT_MS),
     log: chunk => process.stderr.write(chunk),
     onUnexpectedExit: ({ code, signal }) => {
       console.error(`desktop Host exited unexpectedly (code ${String(code)}, signal ${String(signal)})`)

@@ -2,94 +2,16 @@
 
 import { spawn, type ChildProcessByStdio } from 'node:child_process'
 import type { Readable } from 'node:stream'
+import { LOOPBACK_HOST } from './loopback.ts'
 
-const READINESS_PREFIX = 'dsh web: '
 const DEFAULT_READINESS_TIMEOUT_MS = 90_000
+const DEFAULT_READINESS_INTERVAL_MS = 250
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000
 const MAX_STARTUP_OUTPUT_CHARS = 32_768
 
-/** Incremental parser for the Web Host's canonical readiness line. */
-export interface ReadinessParser {
-  /**
-   * Consume one stdout chunk.
-   * @param chunk - Text emitted by the Host.
-   * @returns The loopback URL once a complete readiness line is observed.
-   */
-  push(chunk: string): string | undefined
-  /**
-   * Finish the stream and require a readiness line.
-   * @returns The parsed loopback URL.
-   */
-  finalize(): string
-}
-
-/** Assert and normalize one readiness line. */
-function parseReadinessLine(line: string): string | undefined {
-  if (!line.startsWith(READINESS_PREFIX)) return undefined
-  const token = line.slice(READINESS_PREFIX.length).split(/\s/u, 1)[0]
-  if (token === undefined) throw new Error(`desktop Host readiness line has no URL: ${line}`)
-
-  let url: URL
-  try {
-    url = new URL(token)
-  } catch {
-    throw new Error(`desktop Host readiness URL is invalid: ${token}`)
-  }
-  const port = Number(url.port)
-  if (url.protocol !== 'http:'
-    || (url.hostname !== '127.0.0.1' && url.hostname !== 'localhost')
-    || url.pathname !== '/'
-    || url.search !== ''
-    || url.hash !== ''
-    || !Number.isInteger(port)
-    || port < 1
-    || port > 65_535) {
-    throw new Error(`desktop Host readiness URL must be loopback HTTP with an explicit port: ${token}`)
-  }
-  return url.origin
-}
-
-/**
- * Create a line parser whose result is stable after readiness.
- * @returns A fresh incremental parser.
- */
-export function createReadinessParser(): ReadinessParser {
-  let pending = ''
-  let readyUrl: string | undefined
-
-  const accept = (line: string): string | undefined => {
-    const parsed = parseReadinessLine(line.replace(/\r$/u, ''))
-    if (parsed === undefined) return undefined
-    if (readyUrl !== undefined && parsed !== readyUrl) {
-      throw new Error(`desktop Host emitted conflicting readiness URLs: ${readyUrl} and ${parsed}`)
-    }
-    readyUrl = parsed
-    return readyUrl
-  }
-
-  return {
-    push(chunk) {
-      pending += chunk
-      for (;;) {
-        const newline = pending.indexOf('\n')
-        if (newline === -1) return readyUrl
-        const line = pending.slice(0, newline)
-        pending = pending.slice(newline + 1)
-        const parsed = accept(line)
-        if (parsed !== undefined) return parsed
-      }
-    },
-    finalize() {
-      if (pending !== '') accept(pending)
-      if (readyUrl === undefined) throw new Error('desktop Host exited before emitting its readiness URL')
-      return readyUrl
-    },
-  }
-}
-
 /** Child process operations the supervisor owns. */
 export interface HostChild {
-  /** Standard output carrying the readiness line. */
+  /** Standard output carrying startup diagnostics. */
   readonly stdout: { onData(listener: (chunk: string) => void): () => void }
   /** Standard error carrying startup diagnostics. */
   readonly stderr: { onData(listener: (chunk: string) => void): () => void }
@@ -116,6 +38,22 @@ export interface HostChild {
 export interface HostSupervisorOptions {
   /** Spawn one Host process. */
   readonly spawnHost: () => HostChild
+  /**
+   * The loopback origin the Host is told to bind, which the renderer loads
+   * once {@link HostSupervisorOptions.probeReady} answers.
+   */
+  readonly origin: string
+  /**
+   * Ask whether the Host is serving yet.
+   *
+   * Readiness is a question asked of the Host, not a line read from its
+   * stdout: Electron does not deliver a child's piped stdout on Windows, so a
+   * printed readiness line never arrives there.
+   * @returns `true` once the Host answers on its origin.
+   */
+  readonly probeReady: () => Promise<boolean>
+  /** Delay between readiness attempts. */
+  readonly readinessIntervalMs?: number
   /** Maximum startup time before the Host is terminated. */
   readonly readinessTimeoutMs?: number
   /** Grace after SIGTERM before SIGKILL. */
@@ -163,6 +101,7 @@ function deferred<T>(): Deferred<T> {
  */
 export function createHostSupervisor(options: HostSupervisorOptions): HostSupervisor {
   const readinessTimeoutMs = options.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS
+  const readinessIntervalMs = options.readinessIntervalMs ?? DEFAULT_READINESS_INTERVAL_MS
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS
   let child: HostChild | undefined
   let startPromise: Promise<string> | undefined
@@ -183,7 +122,6 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     if (shutdownPromise !== undefined) return Promise.reject(new Error('desktop Host cannot start after shutdown'))
 
     startPromise = new Promise<string>((resolve, reject) => {
-      const parser = createReadinessParser()
       const spawned = options.spawnHost()
       child = spawned
       exitResult = deferred<void>()
@@ -202,27 +140,42 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         const diagnostic = output === '' ? '' : `\nHost output:\n${output}`
         reject(new Error(`${error instanceof Error ? error.message : String(error)}${diagnostic}`))
       }
-      const acceptChunk = (chunk: string): void => {
-        appendOutput(chunk)
-        try {
-          const url = parser.push(chunk)
-          if (url === undefined || settled) return
-          settled = true
-          ready = true
-          cleanupStartup()
-          resolve(url)
-        } catch (error) {
-          fail(error)
-          spawned.kill('SIGTERM')
-        }
+      const succeed = (): void => {
+        if (settled) return
+        settled = true
+        ready = true
+        cleanupStartup()
+        resolve(options.origin)
       }
 
       const timer = setTimeout(() => {
         fail(new Error(`desktop Host readiness timed out after ${String(readinessTimeoutMs)}ms`))
         spawned.kill('SIGTERM')
       }, readinessTimeoutMs)
-      startupCleanups.push(spawned.stdout.onData(acceptChunk))
+      startupCleanups.push(spawned.stdout.onData(appendOutput))
       startupCleanups.push(spawned.stderr.onData(appendOutput))
+
+      // Polling starts immediately: a Host that is already serving when the
+      // first attempt lands needs no further wait.
+      void (async () => {
+        while (!settled) {
+          let answered: boolean
+          try {
+            answered = await options.probeReady()
+          } catch (error) {
+            fail(error)
+            spawned.kill('SIGTERM')
+            return
+          }
+          if (answered) {
+            succeed()
+            return
+          }
+          // A start settled by timeout or exit during the attempt above is
+          // caught by the loop condition after this wait.
+          await new Promise<void>((wake) => { setTimeout(wake, readinessIntervalMs) })
+        }
+      })()
       spawned.onError((error) => {
         fail(new Error(`desktop Host failed to spawn: ${error.message}`))
         exitResult?.resolve()
@@ -286,6 +239,12 @@ export interface SpawnDshWebOptions {
    * itself identical for a `dsh web` from any other installation.
    */
   readonly patches: readonly string[]
+  /**
+   * The reserved loopback port the Host binds. The desktop picks it rather
+   * than letting the Host take an OS-assigned one, because it has to know the
+   * origin before the Host is up in order to probe it.
+   */
+  readonly port: number
 }
 
 function streamAdapter(stream: NodeJS.ReadableStream): HostChild['stdout'] {
@@ -310,7 +269,10 @@ export function spawnDshWeb(options: SpawnDshWebOptions): HostChild {
   // `dsh web` passes options through once it meets one it does not own, so its
   // own --patch has to precede the web app's flags.
   const overlays = options.patches.flatMap(patch => ['--patch', patch])
-  const args = ['--expose-internals', options.cliEntry, 'web', ...overlays, '--host', '127.0.0.1', '--port', '0']
+  const args = [
+    '--expose-internals', options.cliEntry, 'web', ...overlays,
+    '--host', LOOPBACK_HOST, '--port', String(options.port),
+  ]
   const child = spawn(options.nodeExecutable, args, {
     cwd: options.cwd,
     env,
