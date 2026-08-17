@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-16-desktop-plugin-staging-and-overlay.md
-2026-08-16-desktop-plugin-staging-and-overlay.md: c891b425d32b1babd038c6c283fa2240937c73f9
-2026-08-16-desktop-plugin-staging-and-overlay.zh.md: 166be85d891d2fd56a2d653a39f62cf93dc4f21f
+2026-08-16-desktop-plugin-staging-and-overlay.md: dff41ff407a9c6da913f028e4e066f35a5dc30c0
+2026-08-16-desktop-plugin-staging-and-overlay.zh.md: dad12a8e4bba8ea74cd3b105927a6e541954668c

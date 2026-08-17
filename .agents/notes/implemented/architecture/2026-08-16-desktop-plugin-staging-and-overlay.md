@@ -26,7 +26,7 @@ Composing per launch is what keeps the profile itself untouched. `$DSH_HOME/prof
 
 Because an earlier build did write into that profile, staging first prunes what it left: the bundle row, the `file:` dependency pinning the plugin to the building machine, and the profile-local copy. All three have to go — a surviving bundle row composes the plugin a second time on top of the overlay, and a surviving profile-local copy wins the module lookup over the staged one.
 
-A copy rather than a symlink is what survives the Windows portable build, which unpacks to a fresh directory on every run; a link into the application would dangle.
+A copy rather than a symlink is what keeps the staged plugin independent of the application's own location: creating a symlink on Windows needs developer mode or elevation, and a link into an application that is later moved or uninstalled would dangle.
 
 ## Verification
 
@@ -44,7 +44,7 @@ End to end, against an empty `$DSH_HOME` and with no package manager involved: t
 
 **Keep writing the profile's bundle list.** Self-contained, and it survives the application's removal. Rejected because the profile is shared: the user's own `dsh web` would then boot a profile listing a package that only the desktop application ships, and the Loader fails loud on a bundle it cannot resolve.
 
-**Symlink the staged directory into the application.** Avoids copying on every version change. The Windows portable build unpacks to a new directory per run, so the link would dangle on the second launch.
+**Symlink the staged directory into the application.** Avoids copying on every version change. Creating one on Windows needs developer mode or elevation, and the link dangles as soon as the application is moved or uninstalled.
 
 **Give the desktop its own profile.** Removes the sharing constraint outright. Rejected because it silently drops the user's existing `web` profile patch layer, and the desktop deliberately reuses the Web profile ([loopback supervisor](2026-08-15-electron-loopback-web-supervisor.md)).
 

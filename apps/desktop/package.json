@@ -75,12 +75,25 @@
       "icon": "build/icon.png",
       "target": [
         {
-          "target": "portable",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
         }
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "DeepSeek Harness",
+      "runAfterFinish": true,
+      "differentialPackage": false,
+      "useZip": true,
+      "artifactName": "DeepSeek-Harness-${version}-${arch}-Setup.${ext}"
     },
     "linux": {
       "category": "Development",
