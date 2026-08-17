@@ -13,8 +13,14 @@ import type { Win32DialogWorkerMessage } from '../src/win32-dialog-worker.ts'
 
 class FakeWorker extends EventEmitter implements Win32DialogWorkerLike {
   kill = vi.fn(() => true)
+  readonly stderr = new EventEmitter()
   post(message: Win32DialogWorkerMessage): void {
     this.emit('message', message)
+  }
+
+  /** Emit one chunk on the captured stderr stream. */
+  write(chunk: string): void {
+    this.stderr.emit('data', Buffer.from(chunk))
   }
 }
 
@@ -71,6 +77,28 @@ describe('pickWin32Directory', () => {
     const exiting = pickWin32Directory(live(), silent.internals)
     silent.worker.emit('exit', 0)
     await expect(exiting).rejects.toThrow('exited before reporting a result')
+  })
+
+  it('attaches the exit code and captured stderr when the worker never reported', async () => {
+    // A child that dies before its first IPC message explains itself only on
+    // stderr, which a packaged application has no console to show.
+    const { worker, internals } = harness()
+    const exiting = pickWin32Directory(live(), internals)
+
+    worker.write("Error: Cannot find module 'koffi'\n")
+    worker.emit('exit', 1)
+
+    await expect(exiting).rejects.toThrow(/exited before reporting a result \(code 1\)/u)
+    await expect(exiting).rejects.toThrow(/Cannot find module 'koffi'/u)
+  })
+
+  it('reports a null exit code from a signalled worker', async () => {
+    const { worker, internals } = harness()
+    const exiting = pickWin32Directory(live(), internals)
+
+    worker.emit('exit', null)
+
+    await expect(exiting).rejects.toThrow('(code null)')
   })
 
   it('settles once: a late exit after the result is inert', async () => {

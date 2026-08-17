@@ -1,8 +1,15 @@
 /** Reject a packaged desktop shell that omitted the staged Host entrypoints. */
 
-import { access } from 'node:fs/promises'
-import { join } from 'node:path'
+import { access, readdir } from 'node:fs/promises'
+import { join, relative } from 'node:path'
 import type { AfterPackContext } from 'electron-builder'
+
+/**
+ * Longest path Windows accepts without per-process long-path support. The
+ * staged Host is a deep dependency tree, so how much of that budget it spends
+ * decides how long an install directory may be.
+ */
+const WINDOWS_MAX_PATH = 260
 
 const REQUIRED_HOST_FILES = [
   ['@deepseek-ai', 'dsh', 'lib', 'bin.js'],
@@ -34,6 +41,37 @@ export async function afterPack(context: AfterPackContext): Promise<void> {
   for (const segments of REQUIRED_RESOURCES) {
     await access(join(resources, ...segments))
   }
+  await reportPathBudget(context, resources)
+}
+
+/**
+ * Report how much of the Windows path budget the packaged tree already spends.
+ *
+ * The deepest file decides the longest install directory that can still be
+ * written: an installer whose extractor does not opt into long paths silently
+ * drops whatever crosses the limit, which surfaces much later as a missing
+ * module. Printing the number makes that budget visible at build time instead.
+ * @param context - Electron Builder's completed application directory.
+ * @param resources - the packaged resources directory to measure.
+ */
+async function reportPathBudget(context: AfterPackContext, resources: string): Promise<void> {
+  if (context.electronPlatformName !== 'win32') return
+  let longest = ''
+  const walk = async (dir: string): Promise<void> => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) await walk(path)
+      else if (path.length > longest.length) longest = path
+    }
+  }
+  await walk(resources)
+  // `resources` sits directly under the install directory, so what remains for
+  // that directory is the limit minus everything below it.
+  const deepest = relative(context.appOutDir, longest)
+  console.log(
+    `desktop packaging: deepest packaged path spends ${String(deepest.length)} characters `
+    + `(${deepest}), leaving ${String(WINDOWS_MAX_PATH - deepest.length)} for the install directory`,
+  )
 }
 
 export default afterPack

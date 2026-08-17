@@ -222,7 +222,12 @@ async function boot(): Promise<void> {
   }
   const paths = hostPaths()
   assertHostArtifacts(paths)
-  startupLog.step(`artifacts present (packaged=${String(app.isPackaged)}, cli=${paths.cliEntry})`)
+  // The path length is recorded, not just the path: Windows drops what an
+  // installer could not write past its limit, and a module missing for that
+  // reason is otherwise indistinguishable from one that was never packaged.
+  startupLog.step(
+    `artifacts present (packaged=${String(app.isPackaged)}, cliPathLength=${String(paths.cliEntry.length)}, cli=${paths.cliEntry})`,
+  )
   // Before the Host boots: the plugin must be staged where the Loader resolves
   // it, so the overlay below can compose it into this launch. A development
   // launch reads the checkout, whose version does not move as its source does.
