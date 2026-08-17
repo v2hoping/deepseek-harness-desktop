@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-17-desktop-startup-log-and-window-reveal.md
-2026-08-17-desktop-startup-log-and-window-reveal.md: e1bb28497f3ffb482b12b617404c7e7b332bbfff
-2026-08-17-desktop-startup-log-and-window-reveal.zh.md: 4ea5e04a0a665a4138883c468ea5179c5affc8f7
+2026-08-17-desktop-startup-log-and-window-reveal.md: 4d36cb0fba420f61e051fa6d1a5c837b169013a2
+2026-08-17-desktop-startup-log-and-window-reveal.zh.md: cc06171327745e2b3a7a0f0456898742c5be66f3

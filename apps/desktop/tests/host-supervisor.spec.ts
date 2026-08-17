@@ -130,6 +130,24 @@ describe('desktop Host supervisor', () => {
     await expect(starting).resolves.toBe(ORIGIN)
   })
 
+  it('keeps forwarding Host output after readiness', async () => {
+    // A packaged Windows application has no console for the Host's stderr, so
+    // anything it reports while running — a native worker that failed to load,
+    // a plugin that threw — is only visible if forwarding outlives startup.
+    const probe = new FakeProbe()
+    const child = new FakeHostChild()
+    const lines: string[] = []
+    const supervisor = supervisorOver(probe, child, { log: (line) => { lines.push(line) } })
+
+    probe.answer()
+    await supervisor.start()
+    child.stderr.emit('win32 folder dialog worker exited\n')
+    child.stdout.emit('still serving\n')
+
+    expect(lines.join('')).toContain('win32 folder dialog worker exited')
+    expect(lines.join('')).toContain('still serving')
+  })
+
   it('reports output when the Host exits before readiness', async () => {
     const probe = new FakeProbe()
     const child = new FakeHostChild()

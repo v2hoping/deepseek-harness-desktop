@@ -42,12 +42,19 @@ export interface StartupLog {
 export function createStartupLog(dir: string): StartupLog {
   const path = join(dir, 'startup.log')
   const started = Date.now()
+  // The Host keeps writing for as long as it runs, so this launch's own budget
+  // is enforced per write rather than only at open. Stopping at the cap keeps
+  // the earliest lines, which are the ones that explain a startup.
+  let budget = MAX_LOG_BYTES
   const write = (line: string): void => {
+    if (budget <= 0) return
+    const entry = `${new Date().toISOString()} +${String(Date.now() - started)}ms ${line}\n`
+    budget -= entry.length
     try {
-      appendFileSync(path, `${new Date().toISOString()} +${String(Date.now() - started)}ms ${line}\n`)
+      appendFileSync(path, budget <= 0 ? `${entry}--- log truncated at ${String(MAX_LOG_BYTES)} bytes\n` : entry)
     } catch {
       // The log is the diagnostic of last resort; a launch must not fail
-      // because its user-data directory is unwritable.
+      // because its log directory is unwritable.
     }
   }
   try {

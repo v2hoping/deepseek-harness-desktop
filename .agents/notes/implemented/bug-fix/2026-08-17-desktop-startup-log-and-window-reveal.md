@@ -16,7 +16,9 @@ The window itself carried a silent failure. It was constructed with `show: false
 
 Every startup step appends a timestamped line to `startup.log` in the platform's own log directory — `~/Library/Logs/DeepSeek Harness` on macOS, `%APPDATA%\DeepSeek Harness\logs` on Windows — carrying wall-clock time and milliseconds since launch, so a log shows which step stalled rather than only which step was last. The Host's output and the account plugin's staging report are recorded there as well as written to stderr. The startup-failure dialog names the file, because a user cannot report a log whose location they were never told.
 
-Writing to the log never fails a launch. It is the diagnostic of last resort, so an unwritable directory degrades to dropped lines. An oversized log from earlier launches is discarded rather than grown, since a log too large to send is no longer a diagnostic.
+Forwarding the Host's output outlives startup. The supervisor previously dropped its output listeners once the Host answered, which was enough to explain a failed start and nothing else: a native dialog worker that fails to load, or a plugin that throws an hour in, writes to a stderr the packaged application has no console for. Buffering stays startup-only — it exists to attach recent output to a start that failed, not to accumulate a running Host's whole history.
+
+Writing to the log never fails a launch. It is the diagnostic of last resort, so an unwritable directory degrades to dropped lines. An oversized log from earlier launches is discarded rather than grown, and each launch also spends a byte budget as it writes, since the Host keeps producing output for as long as it runs. Stopping at the cap keeps the earliest lines, which are the ones that explain a startup.
 
 Window reveal is driven by the first paint (`ready-to-show`) instead of by `loadURL` settling, with a 15-second fallback and an immediate reveal on `did-fail-load`. A window that fails to load now appears showing its error rather than never appearing at all, and `loadURL` remains awaited so a rejected load still fails the start loudly.
 
