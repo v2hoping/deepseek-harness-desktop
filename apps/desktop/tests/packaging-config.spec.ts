@@ -17,7 +17,10 @@ interface DesktopPackage {
       readonly to: string
     }[]
     readonly mac: { readonly icon: string; readonly target: readonly string[] }
-    readonly win: { readonly icon: string; readonly target: readonly string[] }
+    readonly win: {
+      readonly icon: string
+      readonly target: readonly { readonly target: string; readonly arch: readonly string[] }[]
+    }
   }
 }
 
@@ -146,8 +149,11 @@ describe('release matrix', () => {
     expect(workflow).toMatch(/runner: windows-latest\n\s+target: windows-x64/u)
   })
 
-  it('ships Windows as a portable executable', () => {
-    expect(desktopPackage.build.win.target).toEqual(['portable'])
+  it('ships Windows as a portable x64 executable', () => {
+    // The architecture is declared rather than defaulted: the NSIS launcher
+    // electron-builder wraps a portable build in is itself 32-bit, so the
+    // packaged architecture is not readable from the produced executable.
+    expect(desktopPackage.build.win.target).toEqual([{ target: 'portable', arch: ['x64'] }])
   })
 
   it('grants release write only to the publishing job', () => {

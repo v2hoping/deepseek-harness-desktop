@@ -2,7 +2,6 @@ import { spawn } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createHostSupervisor,
-  createReadinessParser,
   type HostChild,
 } from '../src/host-supervisor.ts'
 
@@ -66,86 +65,75 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('desktop Host readiness', () => {
-  it('extracts the canonical URL from arbitrarily chunked output and ignores unrelated URLs', () => {
-    const parser = createReadinessParser()
+/** Readiness the test drives, standing in for the Host answering on its origin. */
+class FakeProbe {
+  private answering = false
+  private failure: Error | undefined
 
-    expect(parser.push('Node warning: see https://nodejs.org/docs\n')).toBeUndefined()
-    expect(parser.push('dsh we')).toBeUndefined()
-    expect(parser.push('b: http://127.0.')).toBeUndefined()
-    expect(parser.push('0.1:4173 (LAN: http://192.0.2.10:4173)')).toBeUndefined()
-    expect(parser.push('\nstartup complete\n')).toBe('http://127.0.0.1:4173')
-    expect(parser.finalize()).toBe('http://127.0.0.1:4173')
+  readonly probe = async (): Promise<boolean> => {
+    if (this.failure !== undefined) throw this.failure
+    return this.answering
+  }
+
+  answer(): void { this.answering = true }
+  breakWith(failure: Error): void { this.failure = failure }
+}
+
+const ORIGIN = 'http://127.0.0.1:4567'
+
+/** Supervisor over a fake child whose readiness the test controls. */
+function supervisorOver(
+  probe: FakeProbe,
+  child: HostChild | (() => HostChild),
+  overrides: Partial<Parameters<typeof createHostSupervisor>[0]> = {},
+) {
+  return createHostSupervisor({
+    spawnHost: typeof child === 'function' ? child : () => child,
+    origin: ORIGIN,
+    probeReady: probe.probe,
+    readinessIntervalMs: 1,
+    ...overrides,
   })
-
-  it('accepts a complete unterminated readiness line when the stream ends', () => {
-    const parser = createReadinessParser()
-
-    expect(parser.push('diagnostic\ndsh web: http://localhost:51234')).toBeUndefined()
-    expect(parser.finalize()).toBe('http://localhost:51234')
-  })
-
-  it.each([
-    'dsh web: https://127.0.0.1:4173',
-    'dsh web: http://0.0.0.0:4173',
-    'dsh web: http://127.0.0.1:0',
-    'dsh web: http://127.0.0.1:65536',
-    'dsh web: http://127.0.0.1:not-a-port',
-  ])('rejects an invalid readiness line: %s', (line) => {
-    const parser = createReadinessParser()
-
-    expect(() => parser.push(`${line}\n`)).toThrow(/readiness/iu)
-  })
-
-  it('fails when the stream ends before a readiness line arrives', () => {
-    const parser = createReadinessParser()
-
-    parser.push('ordinary startup output\n')
-    expect(() => parser.finalize()).toThrow(/readiness/iu)
-  })
-
-  it('rejects conflicting readiness URLs', () => {
-    const parser = createReadinessParser()
-
-    expect(parser.push('dsh web: http://127.0.0.1:4173\n')).toBe('http://127.0.0.1:4173')
-    expect(() => parser.push('dsh web: http://127.0.0.1:4174\n')).toThrow(/conflicting readiness URLs/iu)
-  })
-})
+}
 
 describe('desktop Host supervisor', () => {
-  it('starts one child for concurrent callers and returns its stdout readiness URL', async () => {
+  it('starts one child for concurrent callers and returns the origin it probed', async () => {
+    const probe = new FakeProbe()
     const child = new FakeHostChild()
     const spawnHost = vi.fn(() => child)
-    const supervisor = createHostSupervisor({ spawnHost })
+    const supervisor = supervisorOver(probe, spawnHost)
 
     const first = supervisor.start()
     const second = supervisor.start()
     expect(second).toBe(first)
     expect(spawnHost).toHaveBeenCalledOnce()
 
-    child.stdout.emit('dsh web: http://127.0.0.1:4567\n')
-    await expect(first).resolves.toBe('http://127.0.0.1:4567')
+    probe.answer()
+    await expect(first).resolves.toBe(ORIGIN)
     expect(child.signals).toEqual([])
   })
 
-  it('does not combine stderr and stdout fragments into a readiness line', async () => {
+  it('ignores stdout entirely when deciding readiness', async () => {
+    // Electron drops a child's piped stdout on Windows, so a Host that printed
+    // its readiness line but is not yet answering must not count as ready --
+    // and one answering without ever printing must.
+    const probe = new FakeProbe()
     const child = new FakeHostChild()
-    const supervisor = createHostSupervisor({ spawnHost: () => child })
+    const supervisor = supervisorOver(probe, child)
     const starting = supervisor.start()
     const settled = observeSettlement(starting)
 
-    child.stderr.emit('dsh we')
-    child.stdout.emit('b: http://127.0.0.1:4567\n')
-    await Promise.resolve()
-    expect(settled).not.toHaveBeenCalled()
+    child.stdout.emit(`dsh web: ${ORIGIN}\n`)
+    await vi.waitFor(() => { expect(settled).not.toHaveBeenCalled() })
 
-    child.stdout.emit('dsh web: http://127.0.0.1:4567\n')
-    await expect(starting).resolves.toBe('http://127.0.0.1:4567')
+    probe.answer()
+    await expect(starting).resolves.toBe(ORIGIN)
   })
 
   it('reports output when the Host exits before readiness', async () => {
+    const probe = new FakeProbe()
     const child = new FakeHostChild()
-    const supervisor = createHostSupervisor({ spawnHost: () => child })
+    const supervisor = supervisorOver(probe, child)
     const starting = supervisor.start()
 
     child.stderr.emit('configuration rejected\n')
@@ -156,65 +144,50 @@ describe('desktop Host supervisor', () => {
 
   it('contains a synchronous spawn failure as a rejected start', async () => {
     const failure = new Error('spawn unavailable')
-    const supervisor = createHostSupervisor({
-      spawnHost: () => { throw failure },
-    })
+    const supervisor = supervisorOver(new FakeProbe(), () => { throw failure })
 
     await expect(supervisor.start()).rejects.toBe(failure)
   })
 
+  it('terminates the child when the probe itself fails', async () => {
+    const probe = new FakeProbe()
+    const child = new FakeHostChild()
+    probe.breakWith(new Error('probe unavailable'))
+    const supervisor = supervisorOver(probe, child)
+
+    await expect(supervisor.start()).rejects.toThrow('probe unavailable')
+    expect(child.signals).toEqual(['SIGTERM'])
+  })
+
   it('forbids starting after shutdown', async () => {
     const spawnHost = vi.fn(() => new FakeHostChild())
-    const supervisor = createHostSupervisor({ spawnHost })
+    const supervisor = supervisorOver(new FakeProbe(), spawnHost)
 
     await expect(supervisor.shutdown()).resolves.toBeUndefined()
     await expect(supervisor.start()).rejects.toThrow('desktop Host cannot start after shutdown')
     expect(spawnHost).not.toHaveBeenCalled()
   })
 
-  it('rejects startup when the child exits after an unterminated readiness fragment', async () => {
-    const child = new FakeHostChild()
-    const supervisor = createHostSupervisor({ spawnHost: () => child })
-    const starting = supervisor.start()
-
-    child.stdout.emit('dsh web: http://127.0.0.1:4567')
-    child.emitExit(0)
-
-    await expect(starting).rejects.toThrow(/exited before readiness/iu)
-  })
-
   it('times out startup once and terminates the unready child', async () => {
-    vi.useFakeTimers()
+    const probe = new FakeProbe()
     const child = new FakeHostChild()
-    const supervisor = createHostSupervisor({
-      spawnHost: () => child,
-      readinessTimeoutMs: 25,
-    })
-    const starting = supervisor.start()
-    const rejected = expect(starting).rejects.toThrow('desktop Host readiness timed out after 25ms')
+    const supervisor = supervisorOver(probe, child, { readinessTimeoutMs: 25 })
 
-    await vi.advanceTimersByTimeAsync(24)
-    expect(child.signals).toEqual([])
-    await vi.advanceTimersByTimeAsync(1)
-    await rejected
+    await expect(supervisor.start()).rejects.toThrow('desktop Host readiness timed out after 25ms')
     expect(child.signals).toEqual(['SIGTERM'])
 
-    await vi.advanceTimersByTimeAsync(100)
+    await new Promise<void>((wake) => { setTimeout(wake, 25) })
     expect(child.signals).toEqual(['SIGTERM'])
   })
 
   it('reports a ready Host exit only when shutdown does not own it', async () => {
+    const probe = new FakeProbe()
     const child = new FakeHostChild()
     const onUnexpectedExit = vi.fn()
-    const supervisor = createHostSupervisor({
-      spawnHost: () => child,
-      onUnexpectedExit,
-    })
-    const starting = supervisor.start()
-    await Promise.resolve()
-    child.stdout.emit('dsh web: http://127.0.0.1:4567\n')
-    await starting
+    const supervisor = supervisorOver(probe, child, { onUnexpectedExit })
 
+    probe.answer()
+    await supervisor.start()
     child.emitExit(9, null)
 
     expect(onUnexpectedExit).toHaveBeenCalledOnce()
@@ -222,17 +195,13 @@ describe('desktop Host supervisor', () => {
   })
 
   it('coalesces shutdown and waits for the ready child to exit after SIGTERM', async () => {
-    vi.useFakeTimers()
+    const probe = new FakeProbe()
     const child = new FakeHostChild()
     const onUnexpectedExit = vi.fn()
-    const supervisor = createHostSupervisor({
-      spawnHost: () => child,
-      shutdownTimeoutMs: 25,
-      onUnexpectedExit,
-    })
-    const starting = supervisor.start()
-    child.stdout.emit('dsh web: http://127.0.0.1:4567\n')
-    await starting
+    const supervisor = supervisorOver(probe, child, { shutdownTimeoutMs: 25, onUnexpectedExit })
+
+    probe.answer()
+    await supervisor.start()
 
     const first = supervisor.shutdown()
     const second = supervisor.shutdown()
@@ -242,40 +211,27 @@ describe('desktop Host supervisor', () => {
     expect(onUnexpectedExit).not.toHaveBeenCalled()
 
     child.emitExit(0)
-    await vi.advanceTimersByTimeAsync(0)
-    expect(settled).toHaveBeenCalledOnce()
     await expect(first).resolves.toBeUndefined()
-
-    await vi.advanceTimersByTimeAsync(25)
-    expect(child.signals).toEqual(['SIGTERM'])
+    expect(settled).toHaveBeenCalledOnce()
   })
 
   it('escalates a stuck shutdown once and still waits for child exit', async () => {
-    vi.useFakeTimers()
+    const probe = new FakeProbe()
     const child = new FakeHostChild()
-    const supervisor = createHostSupervisor({
-      spawnHost: () => child,
-      shutdownTimeoutMs: 25,
-    })
-    const starting = supervisor.start()
-    child.stdout.emit('dsh web: http://127.0.0.1:4567\n')
-    await starting
+    const supervisor = supervisorOver(probe, child, { shutdownTimeoutMs: 25 })
+
+    probe.answer()
+    await supervisor.start()
 
     const closing = supervisor.shutdown()
     const settled = observeSettlement(closing)
     expect(child.signals).toEqual(['SIGTERM'])
-    await vi.advanceTimersByTimeAsync(24)
-    expect(child.signals).toEqual(['SIGTERM'])
-    await vi.advanceTimersByTimeAsync(1)
-    expect(child.signals).toEqual(['SIGTERM', 'SIGKILL'])
+    await vi.waitFor(() => { expect(child.signals).toEqual(['SIGTERM', 'SIGKILL']) })
     expect(settled).not.toHaveBeenCalled()
 
-    await vi.advanceTimersByTimeAsync(100)
-    expect(child.signals).toEqual(['SIGTERM', 'SIGKILL'])
     child.emitExit(null, 'SIGKILL')
-    await vi.advanceTimersByTimeAsync(0)
-    expect(settled).toHaveBeenCalledOnce()
     await expect(closing).resolves.toBeUndefined()
+    expect(settled).toHaveBeenCalledOnce()
   })
 })
 
@@ -298,11 +254,12 @@ describe('desktop Host process', () => {
       env: { DSH_DESKTOP: '1' },
       electronRunAsNode: true,
       patches: [],
+      port: 4567,
     })
 
     expect(spawn).toHaveBeenCalledWith(
       '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness',
-      ['--expose-internals', expect.stringContaining('/Resources/host/node_modules/@deepseek-ai/dsh/lib/bin.js'), 'web', '--host', '127.0.0.1', '--port', '0'],
+      ['--expose-internals', expect.stringContaining('/Resources/host/node_modules/@deepseek-ai/dsh/lib/bin.js'), 'web', '--host', '127.0.0.1', '--port', '4567'],
       expect.objectContaining({ env: { DSH_DESKTOP: '1', ELECTRON_RUN_AS_NODE: '1' } }),
     )
   })
@@ -324,6 +281,7 @@ describe('desktop Host process', () => {
       cwd: '/Users/tester',
       env: {},
       patches: ['/home/.dsh/profiles/node_modules/@deepseek-ai/dsh-desktop-account/cordis.patch.yml'],
+      port: 4567,
     })
 
     // `dsh web` stops parsing its own options at the first one it does not
@@ -333,7 +291,7 @@ describe('desktop Host process', () => {
       [
         '--expose-internals', '/app/bin.js', 'web',
         '--patch', '/home/.dsh/profiles/node_modules/@deepseek-ai/dsh-desktop-account/cordis.patch.yml',
-        '--host', '127.0.0.1', '--port', '0',
+        '--host', '127.0.0.1', '--port', '4567',
       ],
       expect.objectContaining({ cwd: '/Users/tester' }),
     )
