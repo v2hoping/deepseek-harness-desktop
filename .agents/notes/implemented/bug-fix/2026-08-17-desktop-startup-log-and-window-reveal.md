@@ -22,6 +22,8 @@ Writing to the log never fails a launch. It is the diagnostic of last resort, so
 
 Window reveal is driven by the first paint (`ready-to-show`) instead of by `loadURL` settling, with a 15-second fallback and an immediate reveal on `did-fail-load`. A window that fails to load now appears showing its error rather than never appearing at all, and `loadURL` remains awaited so a rejected load still fails the start loudly.
 
+The window is also created before the Host is waited on, loading a splash page carrying no script and no external reference, and swapping to the Host's origin once that answers. Loading the Host's plugin tree past on-access virus scanning takes long enough on Windows that an empty desktop reads as a failure to start; the wait is the same length either way, but it is now visible. Session policy and the tray move ahead of that window for the same reason — the splash is a renderer, so the policy that governs renderers has to exist before it.
+
 ## Verification
 
 `apps/desktop/tests/startup-log.spec.ts` pins the ordered lines and their timestamp format, the failure record with its stack, directory creation, discarding an oversized previous log, and that a log which cannot be written throws nothing at its caller.
@@ -34,7 +36,7 @@ The reveal paths are not covered by a unit test: they are Electron `BrowserWindo
 
 **Log through Electron's `--enable-logging` switch.** Built in, and it captures Chromium's internals too. It writes what Chromium chooses to write, not the desktop's own startup steps, and it has to be enabled by the person who already cannot start the application.
 
-**Show the window immediately at construction.** Removes the invisible-window failure outright. It also shows an empty frame for the whole Host startup — seconds of blank window on every launch — which is what `show: false` exists to avoid.
+**Show the unpainted window at construction, loading nothing into it.** Removes the invisible-window failure outright and needs no splash document. It presents an empty frame for the whole Host startup, which reads as a hung application rather than a starting one; a splash page costs one small inline document and says which of the two is happening.
 
 **Keep revealing only after `loadURL` and add a timeout there.** Closer to the previous behavior. `ready-to-show` is the earlier and more accurate signal: it fires when there is something to display, whereas `loadURL` waits for every subresource before conceding the page is up.
 
