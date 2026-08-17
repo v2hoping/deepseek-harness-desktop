@@ -1,18 +1,47 @@
-/** Materialize the packaged desktop Host dependency closure. */
+/** Materialize the packaged desktop Host dependency closure and archive it. */
 
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { cp, lstat, mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve, sep } from 'node:path'
+import { cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { dirname, extname, join, resolve, sep } from 'node:path'
+import { createPackageWithOptions } from '@electron/asar'
 
 const desktopRoot = resolve(import.meta.dirname, '..')
 const repositoryRoot = resolve(desktopRoot, '../..')
 const staging = join(desktopRoot, 'runtime-host')
+const archive = join(desktopRoot, 'runtime-host.asar')
+// Electron Builder silently skips extraResources paths named `*.asar.unpacked`
+// (it owns that pattern for app.asar), so the unpacked tree is staged under a
+// neutral name and mapped back to `host.asar.unpacked` at copy time.
+const unpackedStage = join(desktopRoot, 'runtime-host-natives')
 const deployRoot = resolve(desktopRoot, 'runtime')
 const deployPackage = '@deepseek-ai/dsh-desktop-runtime'
 const entry = join(staging, 'node_modules/@deepseek-ai/dsh/lib/bin.js')
 const frontend = join(staging, 'node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html')
 const workspaceState = join(repositoryRoot, 'node_modules/.pnpm-workspace-state-v1.json')
+
+/**
+ * Files the Host never reads at runtime, pruned before archiving. Extensions
+ * name what is structurally dead in a built closure: sourcemaps, TypeScript
+ * sources (the packaged Host runs built lib with no transpiling hook), and
+ * native build inputs whose compiled twins ship as prebuilds. Markdown is
+ * pruned by documentation-conventional NAME only — packages do read `.md`
+ * runtime assets (`dsh-skill-badge/assets/dsh-badge.md`), so the extension
+ * alone must not condemn a file.
+ */
+const PRUNED_EXTENSIONS = new Set(['.map', '.ts', '.mts', '.cts', '.c', '.cc', '.cpp', '.h', '.hh', '.hpp', '.inc'])
+const PRUNED_DOC_NAMES
+  = /^(?:readme|changelog|changes|history|contributing|security|code_of_conduct|governance|authors|upgrading|migration)\b.*\.md$/iu
+
+/**
+ * What must stay a real file beside the archive: anything the operating system
+ * itself has to open — native modules `dlopen`ed, executables and libraries
+ * spawned or loaded by name — plus the packages that ship such binaries under
+ * their own directories (node-pty's console hosts, ripgrep's `rg`, the
+ * Landlock launcher).
+ */
+const UNPACK_FILES = '{**/*.node,**/*.exe,**/*.dll,**/*.dylib,**/*.so,**/*.so.*}'
+const UNPACK_DIRS = '{**/node-pty,**/node-pty/**,**/@vscode/ripgrep,**/@vscode/ripgrep/**,**/node-addon-landlock-run*,**/node-addon-landlock-run*/**}'
 
 interface Manifest {
   readonly dependencies?: Readonly<Record<string, string>>
@@ -105,6 +134,38 @@ async function deploy(): Promise<void> {
   }
 }
 
+/** Remove declaration, sourcemap, and prose files the Host never reads. */
+async function prune(directory: string): Promise<void> {
+  for (const item of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, item.name)
+    if (item.isDirectory()) await prune(path)
+    else if (PRUNED_EXTENSIONS.has(extname(item.name)) || item.name.endsWith('.d.ts')
+      || PRUNED_DOC_NAMES.test(item.name)) {
+      await rm(path, { force: true })
+    }
+  }
+}
+
+/**
+ * Archive the staged closure into one asar plus its unpacked binaries.
+ *
+ * The archive is what makes startup pay for one file instead of thousands:
+ * every module read resolves inside the archive through Electron's patched
+ * `fs`, so per-file open costs — on Windows, an on-access virus scan per
+ * first read — collapse to one.
+ */
+async function pack(): Promise<void> {
+  await rm(archive, { force: true })
+  await rm(`${archive}.unpacked`, { recursive: true, force: true })
+  await rm(unpackedStage, { recursive: true, force: true })
+  await createPackageWithOptions(staging, archive, {
+    unpack: UNPACK_FILES,
+    unpackDir: UNPACK_DIRS,
+  })
+  if (!existsSync(archive)) throw new Error(`desktop Host archive missing after packing: ${archive}`)
+  await rename(`${archive}.unpacked`, unpackedStage)
+}
+
 async function main(): Promise<void> {
   await run(process.execPath, [
     '--import', 'tsx', 'scripts/verify-runtime-closure.ts',
@@ -116,7 +177,9 @@ async function main(): Promise<void> {
   await materializeLinks()
   if (!existsSync(entry)) throw new Error(`desktop Host entry missing after staging: ${entry}`)
   if (!existsSync(frontend)) throw new Error(`desktop Web frontend missing after staging: ${frontend}`)
-  console.log(`desktop runtime staged at ${staging}`)
+  await prune(staging)
+  await pack()
+  console.log(`desktop runtime staged at ${staging} and archived at ${archive}`)
 }
 
 await main()

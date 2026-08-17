@@ -15,6 +15,7 @@ interface DesktopPackage {
     readonly extraResources: readonly {
       readonly from: string
       readonly to: string
+      readonly filter?: readonly string[]
     }[]
     readonly mac: { readonly icon: string; readonly target: readonly string[] }
     readonly win: {
@@ -59,11 +60,19 @@ describe('desktop packaging configuration', () => {
     expect(workspaceConfiguration).toContain('- apps/desktop/runtime')
   })
 
-  it('maps the staged Host node_modules directory as the copy root', () => {
+  it('ships the Host closure as one archive with its binaries beside it', () => {
+    // The archive is what makes startup pay for one file open instead of
+    // thousands; the resolver beside it is what makes bare plugin names reach
+    // inside, since nothing can symlink into an archive.
     expect(desktopPackage.build.extraResources).toEqual(expect.arrayContaining([
-      { from: 'runtime-host/package.json', to: 'host/package.json' },
-      { from: 'runtime-host/node_modules', to: 'host/node_modules' },
+      { from: 'runtime-host.asar', to: 'host.asar' },
+      { from: 'lib/host-resolver.mjs', to: 'host-resolver.mjs' },
     ]))
+    // The unpacked natives are copied by afterPack, not extraResources:
+    // Electron Builder silently drops mappings whose names involve
+    // `*.asar.unpacked`, which is the one sibling name Electron requires.
+    expect(desktopPackage.build.extraResources.map(entry => entry.to))
+      .not.toContain('host/node_modules')
     expect(desktopPackage.build.afterPack).toBe('./scripts/verify-packaged-runtime.ts')
   })
 

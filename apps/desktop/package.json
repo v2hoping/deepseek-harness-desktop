@@ -21,6 +21,7 @@
   "license": "MIT",
   "devDependencies": {
     "@deepseek-ai/dsh-desktop-account": "workspace:^",
+    "@electron/asar": "^3.4.1",
     "@types/node": "^22.20.0",
     "electron": "43.4.0",
     "electron-builder": "26.15.3",
@@ -45,12 +46,12 @@
         "to": "desktop-resources"
       },
       {
-        "from": "runtime-host/package.json",
-        "to": "host/package.json"
+        "from": "runtime-host.asar",
+        "to": "host.asar"
       },
       {
-        "from": "runtime-host/node_modules",
-        "to": "host/node_modules"
+        "from": "lib/host-resolver.mjs",
+        "to": "host-resolver.mjs"
       },
       {
         "from": "plugins/account",

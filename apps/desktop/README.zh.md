@@ -27,7 +27,7 @@ pnpm run package:desktop   # apps/desktop/dist/<platform>/DeepSeek Harness.app
 pnpm run dist:desktop      # apps/desktop/dist/DeepSeek-Harness-<version>-<arch>.dmg
 ```
 
-打包后的应用通过 Electron 的 Node 模式在独立进程中运行暂存的 `@deepseek-ai/dsh` CLI。因此应用保留受监管的 Host 生命周期，而不附带第二个 Node 可执行文件。暂存的 CLI 入口或 Web 前端入口缺失时，`afterPack` 检查拒绝该包。
+打包后的应用通过 Electron 的 Node 模式在独立进程中运行暂存的 `@deepseek-ai/dsh` CLI。因此应用保留受监管的 Host 生命周期，而不附带第二个 Node 可执行文件。暂存的闭包以单个 `host.asar` 归档交付，经 Electron 打补丁的 `fs` 读取，需要 `dlopen` 或被 spawn 的二进制解包在其旁边，因此一次启动只打开一个文件而不是数千个——在 Windows 上，这就是一次实时病毒扫描与每模块一次扫描的差别。裸插件名通过 `host-resolver.mjs`（被 spawn 的 Host 以 `--import` 加载的钩子）进入归档，因为没有任何东西能软链进归档内部。归档内的 CLI 入口、Web 前端入口、解析器或解包的原生模块缺失时，`afterPack` 检查拒绝该包。
 
 macOS 与 Windows 都使用纳入版本管理的 `apps/desktop/build/icon.png` 原图；仓库不提交分平台的图标变体。该图标与两张托盘模板图渲染自 `apps/web/public/favicon.svg`——侧边栏与浏览器标签页已经在用的那条鱼，使同一个形状在各处标识该产品：
 

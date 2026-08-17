@@ -2,7 +2,7 @@
 
 import { existsSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   app,
   BrowserWindow,
@@ -17,8 +17,10 @@ import {
 } from 'electron'
 import { ensureAccountPlugin } from './account/ensure-plugin.ts'
 import { registerAccountIpc } from './account/ipc.ts'
+import { registerDirectoryIpc } from './directory-picker/ipc.ts'
 import { createHostSupervisor, spawnDshWeb, type HostSupervisor } from './host-supervisor.ts'
 import { LOOPBACK_HOST, probeLoopbackOrigin, reserveLoopbackPort } from './loopback.ts'
+import { splashUrl } from './splash.ts'
 import { createStartupLog, type StartupLog } from './startup-log.ts'
 import { createDesktopLifecycle, type DesktopLifecycle } from './window-lifecycle.ts'
 
@@ -50,6 +52,7 @@ function hostPaths(): {
   cwd: string
   electronRunAsNode: boolean
   accountPluginDir: string
+  importScript?: string
 } {
   if (!app.isPackaged) {
     return {
@@ -60,12 +63,17 @@ function hostPaths(): {
       accountPluginDir: join(DESKTOP_DIR, 'plugins/account'),
     }
   }
+  // The packaged installation is one asar archive; the Host reads it through
+  // Electron's patched fs and resolves bare plugin names through the resolver
+  // shipped beside it (as a URL: a Windows drive path is not a valid --import
+  // specifier).
   return {
     nodeExecutable: process.execPath,
-    cliEntry: join(process.resourcesPath, 'host/node_modules/@deepseek-ai/dsh/lib/bin.js'),
+    cliEntry: join(process.resourcesPath, 'host.asar/node_modules/@deepseek-ai/dsh/lib/bin.js'),
     cwd: app.getPath('home'),
     electronRunAsNode: true,
     accountPluginDir: join(process.resourcesPath, 'account-plugin'),
+    importScript: pathToFileURL(join(process.resourcesPath, 'host-resolver.mjs')).href,
   }
 }
 
@@ -113,10 +121,16 @@ function hardenSession(): void {
   desktopSession.setPermissionRequestHandler((_webContents, _permission, callback) => { callback(false) })
 }
 
-async function createMainWindow(): Promise<BrowserWindow> {
-  const origin = hostOrigin
-  if (origin === undefined) throw new Error('desktop Host is not ready')
-  startupLog?.step(`creating window for ${origin}`)
+/**
+ * Create the application window and load `initialUrl`.
+ * @param initialUrl - what to show first; the Host's origin once it answers,
+ * and the splash page while it is still starting.
+ * @returns the created window, once its first load has settled.
+ */
+async function createMainWindow(initialUrl?: string): Promise<BrowserWindow> {
+  const target = initialUrl ?? hostOrigin
+  if (target === undefined) throw new Error('desktop Host is not ready')
+  startupLog?.step(`creating window for ${initialUrl === undefined ? target : 'the splash page'}`)
   const window = new BrowserWindow({
     width: WINDOW_WIDTH,
     height: WINDOW_HEIGHT,
@@ -140,8 +154,11 @@ async function createMainWindow(): Promise<BrowserWindow> {
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = undefined
   })
+  // The Host's origin is read per navigation rather than captured: the window
+  // outlives the splash page it opens with, and nothing may navigate to that
+  // origin before the Host has one.
   window.webContents.on('will-navigate', (event, url) => {
-    if (hasOrigin(url, origin)) return
+    if (hostOrigin !== undefined && hasOrigin(url, hostOrigin)) return
     event.preventDefault()
     if (isExternalUrl(url)) void shell.openExternal(url)
   })
@@ -168,7 +185,7 @@ async function createMainWindow(): Promise<BrowserWindow> {
 
   startupLog?.step('loading renderer')
   try {
-    await window.loadURL(origin)
+    await window.loadURL(target)
     startupLog?.step('renderer loaded')
   } catch (error) {
     startupLog?.fail('renderer load', error)
@@ -261,11 +278,11 @@ async function boot(): Promise<void> {
       void requestAppQuit()
     },
   })
-  startupLog.step('spawning host')
-  hostOrigin = await host.start()
-  startupLog.step('host answered its origin')
+  // Policy is installed before any renderer exists, which now includes the
+  // splash page below.
   hardenSession()
   registerAccountIpc()
+  registerDirectoryIpc()
   lifecycle = createDesktopLifecycle({
     getWindow: () => mainWindow,
     createWindow: createMainWindow,
@@ -275,7 +292,32 @@ async function boot(): Promise<void> {
   })
   createTray()
   startupLog.step('tray created')
-  await lifecycle.showWindow()
+
+  // The Host is spawned first and awaited last: its boot overlaps the splash
+  // window's own creation, so neither waits on the other. The separate catch
+  // handler keeps a Host that fails during that overlap from surfacing as an
+  // unhandled rejection before the await below adopts it.
+  startupLog.step('spawning host')
+  const starting = host.start()
+  starting.catch(() => { /* adopted by the await below */ })
+
+  // The window opens before the Host is waited on. Loading the Host's plugin
+  // tree past on-access virus scanning takes long enough on Windows that an
+  // empty desktop reads as a failure to start; the splash page makes the wait
+  // visible, and the window is already on screen when the Host answers.
+  const window = await createMainWindow(splashUrl())
+  startupLog.step('splash shown')
+
+  hostOrigin = await starting
+  startupLog.step('host answered its origin')
+
+  if (window.isDestroyed()) {
+    // Closed during the wait: the tray owns the application now, and asking
+    // for the window again is what reopens it on the Host's own origin.
+    startupLog.step('startup complete (window closed while starting)')
+    return
+  }
+  await window.loadURL(hostOrigin)
   startupLog.step('startup complete')
 }
 

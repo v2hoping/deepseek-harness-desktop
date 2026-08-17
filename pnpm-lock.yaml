@@ -363,6 +363,9 @@ importers:
       '@deepseek-ai/dsh-desktop-account':
         specifier: workspace:^
         version: link:plugins/account
+      '@electron/asar':
+        specifier: ^3.4.1
+        version: 3.4.1
       '@types/node':
         specifier: ^22.20.0
         version: 22.20.0

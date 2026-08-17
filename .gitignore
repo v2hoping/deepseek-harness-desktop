@@ -32,6 +32,8 @@ python/**/__pycache__/
 python/**/.pytest_cache/
 apps/web/dist/
 apps/desktop/runtime-host/
+apps/desktop/runtime-host.asar
+apps/desktop/runtime-host-natives/
 apps/desktop/dist/
 .artifacts/
 .playwright-mcp/

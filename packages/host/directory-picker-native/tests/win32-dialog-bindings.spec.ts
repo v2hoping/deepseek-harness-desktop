@@ -106,6 +106,9 @@ function installFakeKoffi(world: ComWorld): void {
             }
             case 'CoTaskMemFree': return (ptr: unknown) => { world.freed.push(ptr) }
             case 'GetCurrentThreadId': return () => 31337
+            // Measures the string already at the address, so the decoder can
+            // span exactly its allocation instead of a fixed window.
+            case 'lstrlenW': return (ptr: unknown) => ((ptr as FakePtr).text as string).length
             case 'SetThreadDpiAwarenessContext': {
               if (!world.hasThreadDpi) throw new Error(`${dll}: SetThreadDpiAwarenessContext not found`)
               return (context: unknown) => {
@@ -128,8 +131,14 @@ function installFakeKoffi(world: ComWorld): void {
       pointer: (type: unknown) => type,
       sizeof: (type: string) => { void type; return FAKE_POINTER_SIZE },
       view: (value: unknown, len: number): ArrayBuffer => {
+        const text = (value as FakePtr).text as string
+        // A real CoTaskMemAlloc block ends after the string; viewing past it
+        // is the access violation that killed the worker.
+        if (len > (text.length + 1) * 2) {
+          throw new Error(`access violation: viewed ${len} bytes of a ${(text.length + 1) * 2}-byte allocation`)
+        }
         const bytes = Buffer.alloc(len)
-        bytes.write((value as FakePtr).text as string, 'utf16le')
+        bytes.write(text, 'utf16le')
         return bytes.buffer
       },
       register: (fn: (hwnd: unknown, lparam: unknown) => number) => { world.registered += 1; return { fn } },

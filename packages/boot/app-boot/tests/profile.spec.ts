@@ -4,7 +4,7 @@
  * empty-root composition, and the installation module-fallback healing.
  */
 
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -237,6 +237,21 @@ describe('healProfilesModuleFallback', () => {
     healProfilesModuleFallback(anchor, home)
     const before = readlinkSync(join(fallback, 'dep-of-a'))
     expect(before).toContain('dep-of-a')
+  })
+
+  it('links nothing for an installation anchored inside an asar archive', () => {
+    // Archive-internal paths exist only to Electron's patched fs, so a link
+    // pointing there can never resolve; the packaging launcher owns
+    // resolution instead. The anchor here need not exist: the guard must
+    // fire before the manifest is read.
+    const home = tmp()
+    for (const anchor of [
+      '/Applications/App.app/Contents/Resources/host.asar/package.json',
+      'C:\\Users\\u\\AppData\\Local\\Programs\\App\\resources\\host.asar\\package.json',
+    ]) {
+      healProfilesModuleFallback(anchor, home)
+    }
+    expect(existsSync(join(home, 'profiles', 'node_modules'))).toBe(false)
   })
 
   it('throws when a fallback entry is a real directory', () => {

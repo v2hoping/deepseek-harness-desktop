@@ -745,6 +745,7 @@
       "entry": [
         "src/main.ts",
         "src/preload.ts",
+        "src/host-resolver/register.ts",
         "scripts/**/*.ts",
         "tests/**/*.spec.ts"
       ],
