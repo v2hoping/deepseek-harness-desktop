@@ -5,7 +5,10 @@ import type { Readable } from 'node:stream'
 import { LOOPBACK_HOST } from './loopback.ts'
 
 const DEFAULT_READINESS_TIMEOUT_MS = 90_000
-const DEFAULT_READINESS_INTERVAL_MS = 250
+// Each attempt is one loopback connection that fails fast while the Host is
+// still booting, so a tight cadence costs almost nothing and decides how long
+// a ready Host sits undetected.
+const DEFAULT_READINESS_INTERVAL_MS = 100
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000
 const MAX_STARTUP_OUTPUT_CHARS = 32_768
 

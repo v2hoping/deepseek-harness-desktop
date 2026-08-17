@@ -293,6 +293,14 @@ async function boot(): Promise<void> {
   createTray()
   startupLog.step('tray created')
 
+  // The Host is spawned first and awaited last: its boot overlaps the splash
+  // window's own creation, so neither waits on the other. The separate catch
+  // handler keeps a Host that fails during that overlap from surfacing as an
+  // unhandled rejection before the await below adopts it.
+  startupLog.step('spawning host')
+  const starting = host.start()
+  starting.catch(() => { /* adopted by the await below */ })
+
   // The window opens before the Host is waited on. Loading the Host's plugin
   // tree past on-access virus scanning takes long enough on Windows that an
   // empty desktop reads as a failure to start; the splash page makes the wait
@@ -300,8 +308,7 @@ async function boot(): Promise<void> {
   const window = await createMainWindow(splashUrl())
   startupLog.step('splash shown')
 
-  startupLog.step('spawning host')
-  hostOrigin = await host.start()
+  hostOrigin = await starting
   startupLog.step('host answered its origin')
 
   if (window.isDestroyed()) {

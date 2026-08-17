@@ -20,8 +20,18 @@ const entry = join(staging, 'node_modules/@deepseek-ai/dsh/lib/bin.js')
 const frontend = join(staging, 'node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html')
 const workspaceState = join(repositoryRoot, 'node_modules/.pnpm-workspace-state-v1.json')
 
-/** Files the Host never reads at runtime, pruned before archiving. */
-const PRUNED_EXTENSIONS = new Set(['.md', '.map'])
+/**
+ * Files the Host never reads at runtime, pruned before archiving. Extensions
+ * name what is structurally dead in a built closure: sourcemaps, TypeScript
+ * sources (the packaged Host runs built lib with no transpiling hook), and
+ * native build inputs whose compiled twins ship as prebuilds. Markdown is
+ * pruned by documentation-conventional NAME only — packages do read `.md`
+ * runtime assets (`dsh-skill-badge/assets/dsh-badge.md`), so the extension
+ * alone must not condemn a file.
+ */
+const PRUNED_EXTENSIONS = new Set(['.map', '.ts', '.mts', '.cts', '.c', '.cc', '.cpp', '.h', '.hh', '.hpp', '.inc'])
+const PRUNED_DOC_NAMES
+  = /^(?:readme|changelog|changes|history|contributing|security|code_of_conduct|governance|authors|upgrading|migration)\b.*\.md$/iu
 
 /**
  * What must stay a real file beside the archive: anything the operating system
@@ -129,7 +139,8 @@ async function prune(directory: string): Promise<void> {
   for (const item of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, item.name)
     if (item.isDirectory()) await prune(path)
-    else if (PRUNED_EXTENSIONS.has(extname(item.name)) || item.name.endsWith('.d.ts')) {
+    else if (PRUNED_EXTENSIONS.has(extname(item.name)) || item.name.endsWith('.d.ts')
+      || PRUNED_DOC_NAMES.test(item.name)) {
       await rm(path, { force: true })
     }
   }

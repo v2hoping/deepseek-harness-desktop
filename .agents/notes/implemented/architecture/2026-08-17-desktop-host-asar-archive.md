@@ -22,11 +22,11 @@ Bare plugin names reach into the archive through a resolver: `host-resolver.mjs`
 
 `healProfilesModuleFallback` skips an installation anchored inside an archive. The links it would create can never resolve — archive-internal paths exist only to Electron's patched `fs`, not to the operating system a symlink resolves through — and the launcher's resolver replaces what they provided. A `dsh web` from a separate CLI installation still heals and boots the shared profile exactly as before.
 
-Two Electron Builder behaviors shape the packaging: the unpacked tree cannot travel through `extraResources` (mappings whose names involve `*.asar.unpacked` are silently dropped), so `afterPack` copies it from the staging output itself; and the archive is produced by `stage-runtime.ts`, which prunes `.d.ts`/`.map`/`.md` before packing.
+Two Electron Builder behaviors shape the packaging: the unpacked tree cannot travel through `extraResources` (mappings whose names involve `*.asar.unpacked` are silently dropped), so `afterPack` copies it from the staging output itself; and the archive is produced by `stage-runtime.ts`, which prunes structurally dead files before packing — sourcemaps, TypeScript sources (the packaged Host runs built lib with no transpiling hook), native build inputs, and declarations. Markdown is pruned by documentation-conventional name only, never by extension: packages read `.md` runtime assets (`dsh-skill-badge/assets/dsh-badge.md`), and an earlier extension-wide prune deleted that asset while the Host still booted cleanly — a lazily read asset fails at use, not at boot. The pruned closure is 12411 files (from 31891), archived at 86 MB.
 
 ## Verification
 
-End to end on macOS against the real packaged application bundle: the Host boots from `host.asar` on an empty `$DSH_HOME` in ~2.5 s cold, serves `/` with 200, and lists all 38 client plugin bundles in the boot manifest — the same count as the loose-file baseline, which is the check that caught the `require`-retry failure above (the manifest was empty until the resolver used the pinned `createRequire`). The account plugin overlay flow — real files in the profile composing against the archived Host — serves its bundle with both settings registrations. A worker-thread entry inside an asar loads and reports.
+End to end on macOS against the real packaged application bundle: the Host boots from `host.asar` on an empty `$DSH_HOME` in ~2.4 s cold and ~720 ms warm, serves `/` with 200, and lists all 38 client plugin bundles in the boot manifest — the same count as the loose-file baseline, which is the check that caught the `require`-retry failure above (the manifest was empty until the resolver used the pinned `createRequire`). The account plugin overlay flow — real files in the profile composing against the archived Host — serves its bundle with both settings registrations. A worker-thread entry inside an asar loads and reports.
 
 macOS timings: loose files ~570 ms, archive ~715 ms — the archive parses a 170 MB header where macOS charges nothing per file. That overhead ships everywhere; the win this change exists for is the per-file scan tax, which only Windows charges and only a Windows launch can measure.
 
@@ -44,7 +44,7 @@ macOS timings: loose files ~570 ms, archive ~715 ms — the archive parses a 170
 
 ## Consequences
 
-A Windows launch now opens one 170 MB archive instead of ~16 000 files, at every stage that touched them: NSIS extraction at install, Defender's first-read scans, and the Host's module loads. The same layout ships on macOS at ~150 ms of archive-header cost per launch, keeping one startup path on every platform.
+A Windows launch now opens one 86 MB archive instead of ~12 400 files, at every stage that touched them: NSIS extraction at install, Defender's first-read scans, and the Host's module loads. The same layout ships on macOS at ~150 ms of archive-header cost per launch, keeping one startup path on every platform.
 
 The Host's installation is read-only in a stronger sense than before: nothing can write into the archive, which is true to how the installation was already treated.
 

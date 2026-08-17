@@ -22,11 +22,11 @@ Windows 上桌面启动慢到影响使用，且在安装版消除了每次启动
 
 `healProfilesModuleFallback` 对锚定在归档内的安装直接跳过。它本要创建的链接永远无法解析——归档内部路径只对 Electron 打补丁的 `fs` 存在，对符号链接所经过的操作系统不存在——而启动器的解析器替代了它们提供的能力。来自独立 CLI 安装的 `dsh web` 仍照常修复并启动共享 profile。
 
-两个 Electron Builder 行为塑造了打包方式：解包树无法经 `extraResources` 运输（名字涉及 `*.asar.unpacked` 的映射会被静默丢弃），因此由 `afterPack` 自己从暂存输出复制；归档由 `stage-runtime.ts` 产出，打包前剔除 `.d.ts`/`.map`/`.md`。
+两个 Electron Builder 行为塑造了打包方式：解包树无法经 `extraResources` 运输（名字涉及 `*.asar.unpacked` 的映射会被静默丢弃），因此由 `afterPack` 自己从暂存输出复制；归档由 `stage-runtime.ts` 产出，打包前剔除结构上确死的文件——sourcemap、TypeScript 源码（打包后的 Host 运行构建产物，没有任何转译钩子）、原生构建输入与声明文件。Markdown 只按文档惯例的文件名剔除，绝不按扩展名：有包会读取 `.md` 运行时资产（`dsh-skill-badge/assets/dsh-badge.md`），而早先按扩展名的全量剔除删掉了这份资产、Host 却照常启动——懒读取的资产在使用时才失败，不在启动时失败。剔除后的闭包为 12411 个文件（原 31891），归档 86 MB。
 
 ## Verification
 
-在 macOS 上面向真实打包出的应用 bundle 端到端：Host 在空 `$DSH_HOME` 上从 `host.asar` 冷启动约 2.5 秒，`/` 返回 200，boot manifest 列出全部 38 个客户端插件 bundle——与散文件基线相同的数量，而这正是抓住上述 `require` 重试失败的检查（在解析器改用钉住的 `createRequire` 之前，manifest 是空的）。账户插件 overlay 流程——profile 中的真实文件与归档 Host 组合——照常提供其 bundle 及两处设置注册。asar 内的 worker 线程入口可加载并回报。
+在 macOS 上面向真实打包出的应用 bundle 端到端：Host 在空 `$DSH_HOME` 上从 `host.asar` 冷启动约 2.4 秒、热启动约 720 毫秒，`/` 返回 200，boot manifest 列出全部 38 个客户端插件 bundle——与散文件基线相同的数量，而这正是抓住上述 `require` 重试失败的检查（在解析器改用钉住的 `createRequire` 之前，manifest 是空的）。账户插件 overlay 流程——profile 中的真实文件与归档 Host 组合——照常提供其 bundle 及两处设置注册。asar 内的 worker 线程入口可加载并回报。
 
 macOS 计时：散文件约 570 ms，归档约 715 ms——归档要解析 170 MB 的头部，而 macOS 对每个文件不收税。这份开销随处都在；本改动所为的收益是按文件的扫描税，只有 Windows 收取，也只有一次 Windows 启动能度量它。
 
@@ -44,7 +44,7 @@ macOS 计时：散文件约 570 ms，归档约 715 ms——归档要解析 170 M
 
 ## Consequences
 
-Windows 启动现在在每个曾触及散文件的环节都只打开一个 170 MB 归档而非约 16000 个文件：安装时的 NSIS 解压、Defender 的首读扫描、Host 的模块加载。同一布局在 macOS 上以每次启动约 150 ms 的归档头开销交付，保住了所有平台同一条启动路径。
+Windows 启动现在在每个曾触及散文件的环节都只打开一个 86 MB 归档而非约 12400 个文件：安装时的 NSIS 解压、Defender 的首读扫描、Host 的模块加载。同一布局在 macOS 上以每次启动约 150 ms 的归档头开销交付，保住了所有平台同一条启动路径。
 
 Host 的安装以比从前更强的意义变为只读：没有任何东西能写入归档，而这与安装本来被对待的方式一致。
 
