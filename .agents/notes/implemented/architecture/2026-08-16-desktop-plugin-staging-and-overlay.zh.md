@@ -26,7 +26,7 @@ Status: implemented
 
 由于早先的版本确实写过那个 profile，预置会先清除它留下的东西：bundle 行、把插件钉死在构建机上的 `file:` 依赖，以及 profile 本地副本。三者都必须清除——残留的 bundle 行会在 overlay 之上把插件第二次组合进来，残留的本地副本会在模块查找中胜过已预置的那份。
 
-采用复制而非软链，是为了扛住 Windows 便携版：它每次运行都解压到新目录，指向应用的链接会悬空。
+采用复制而非软链，是为了让预置的插件不依赖应用自身的位置：在 Windows 上创建软链需要开发者模式或提权，而指向一个之后被移动或卸载的应用的链接会悬空。
 
 ## Verification
 
@@ -44,7 +44,7 @@ Status: implemented
 
 **继续写 profile 的 bundle 列表。** 自包含，且能在应用被移除后存活。因 profile 共用而否决：用户自己的 `dsh web` 将启动一个列出了只有桌面应用交付的包的 profile，而 Loader 对无法解析的 bundle 直接失败。
 
-**把预置目录软链进应用。** 省去每次版本变化时的复制。Windows 便携版每次运行解压到新目录，该链接在第二次启动时就会悬空。
+**把预置目录软链进应用。** 省去每次版本变化时的复制。但在 Windows 上创建软链需要开发者模式或提权，而且应用一旦被移动或卸载，链接就会悬空。
 
 **给桌面单独一个 profile。** 直接消除共用约束。因其会静默丢弃用户既有的 `web` profile 补丁层而否决，且桌面是刻意复用 Web profile 的（[loopback supervisor](2026-08-15-electron-loopback-web-supervisor.md)）。
 

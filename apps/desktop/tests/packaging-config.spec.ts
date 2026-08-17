@@ -21,6 +21,16 @@ interface DesktopPackage {
       readonly icon: string
       readonly target: readonly { readonly target: string; readonly arch: readonly string[] }[]
     }
+    readonly nsis: {
+      readonly oneClick: boolean
+      readonly perMachine: boolean
+      readonly createDesktopShortcut: boolean
+      readonly createStartMenuShortcut: boolean
+      readonly shortcutName: string
+      readonly runAfterFinish: boolean
+      readonly useZip: boolean
+      readonly artifactName: string
+    }
   }
 }
 
@@ -149,11 +159,25 @@ describe('release matrix', () => {
     expect(workflow).toMatch(/runner: windows-latest\n\s+target: windows-x64/u)
   })
 
-  it('ships Windows as a portable x64 executable', () => {
-    // The architecture is declared rather than defaulted: the NSIS launcher
-    // electron-builder wraps a portable build in is itself 32-bit, so the
-    // packaged architecture is not readable from the produced executable.
-    expect(desktopPackage.build.win.target).toEqual([{ target: 'portable', arch: ['x64'] }])
+  it('ships Windows as an x64 installer', () => {
+    // The architecture is declared rather than defaulted: the NSIS installer
+    // stub is itself 32-bit, so the packaged architecture is not readable from
+    // the produced executable.
+    expect(desktopPackage.build.win.target).toEqual([{ target: 'nsis', arch: ['x64'] }])
+    expect(desktopPackage.build.nsis.artifactName).toBe('DeepSeek-Harness-${version}-${arch}-Setup.${ext}')
+  })
+
+  it('installs once, into the user profile, with shortcuts and a launch', () => {
+    const { nsis } = desktopPackage.build
+    // A portable build unpacked its whole payload to %TEMP% on every launch;
+    // installing writes it once, which is what keeps startup off that path.
+    expect(nsis.oneClick).toBe(false)
+    expect(nsis.runAfterFinish).toBe(true)
+    expect(nsis.createDesktopShortcut).toBe(true)
+    expect(nsis.createStartMenuShortcut).toBe(true)
+    expect(nsis.shortcutName).toBe('DeepSeek Harness')
+    // Per-user keeps the install off the elevation path entirely.
+    expect(nsis.perMachine).toBe(false)
   })
 
   it('grants release write only to the publishing job', () => {

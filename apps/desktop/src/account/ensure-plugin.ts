@@ -11,9 +11,11 @@
  * Staging copies the directory rather than running `dsh plugin add`, which
  * forwards to pnpm. A packaged application cannot reach pnpm: a GUI launched
  * from Finder or Explorer inherits a minimal PATH that excludes a user's own
- * install, and the staged Host ships no package manager. A copy also outlives
- * what a symlink would not, since the Windows portable build unpacks to a new
- * directory on every run and a link into the application would dangle.
+ * install, and the staged Host ships no package manager. A copy rather than a
+ * symlink is what keeps the staged plugin independent of the application's
+ * own location: creating a symlink on Windows needs developer mode or
+ * elevation, and a link into an application that is later moved or uninstalled
+ * would dangle.
  *
  * The profile manifest stays out of it. Composing the plugin is the returned
  * `--patch` overlay's job, so a `dsh web` from a separate installation boots

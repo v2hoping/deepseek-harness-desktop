@@ -18,7 +18,12 @@ export interface Win32DialogWorkerLike {
    */
   on(event: 'message', listener: (message: Win32DialogWorkerMessage) => void): unknown
   on(event: 'error', listener: (error: Error) => void): unknown
-  on(event: 'exit', listener: (code: number) => void): unknown
+  on(event: 'exit', listener: (code: number | null) => void): unknown
+  /**
+   * Captured standard error. A child that dies before its first IPC message
+   * explains itself only here, so the driver attaches this to that failure.
+   */
+  readonly stderr?: { on(event: 'data', listener: (chunk: unknown) => void): unknown } | null
   /**
    * Force-stop the child; the abort path's last resort when `WM_CLOSE`
    * never lands (e.g. the dialog window was never created).
@@ -49,6 +54,8 @@ export const DIALOG_TITLE = 'Select Workspace Directory'
 const CLOSE_RETRY_MS = 150
 /** Abort-service attempts before force-terminating the worker. */
 const CLOSE_MAX_ATTEMPTS = 20
+/** Captured worker stderr retained for a failure report. */
+const MAX_WORKER_OUTPUT_CHARS = 4_096
 
 /** Fail loudly if the closed worker-to-driver union gains an unhandled member. */
 /* v8 ignore start -- closed-union backstop; unreachable without a TypeScript contract violation */
@@ -76,6 +83,10 @@ export async function pickWin32Directory(
   let dialogThreadId: number | undefined
   let closeTimer: NodeJS.Timeout | undefined
   let settled = false
+  let workerOutput = ''
+  worker.stderr?.on('data', (chunk) => {
+    workerOutput = `${workerOutput}${String(chunk)}`.slice(-MAX_WORKER_OUTPUT_CHARS)
+  })
 
   return await new Promise<string | null>((resolve, reject) => {
     const settle = (outcome: () => void): void => {
@@ -150,9 +161,12 @@ export async function pickWin32Directory(
         reject(error)
       })
     })
-    worker.on('exit', () => {
+    worker.on('exit', (code) => {
       settle(() => {
-        reject(new Error('win32 folder dialog worker exited before reporting a result'))
+        const detail = workerOutput === '' ? '' : `\nworker output:\n${workerOutput.trim()}`
+        reject(new Error(
+          `win32 folder dialog worker exited before reporting a result (code ${String(code)})${detail}`,
+        ))
       })
     })
   })

@@ -112,9 +112,9 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
   let shuttingDown = false
   let output = ''
 
-  const appendOutput = (chunk: string): void => {
+  const forward = (chunk: string): void => { options.log?.(chunk) }
+  const buffer = (chunk: string): void => {
     output = `${output}${chunk}`.slice(-MAX_STARTUP_OUTPUT_CHARS)
-    options.log?.(chunk)
   }
 
   const start = (): Promise<string> => {
@@ -152,8 +152,17 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         fail(new Error(`desktop Host readiness timed out after ${String(readinessTimeoutMs)}ms`))
         spawned.kill('SIGTERM')
       }, readinessTimeoutMs)
-      startupCleanups.push(spawned.stdout.onData(appendOutput))
-      startupCleanups.push(spawned.stderr.onData(appendOutput))
+      // Forwarding outlives startup. Everything the Host and its own children
+      // write — a native dialog worker that failed to load, a plugin that threw
+      // an hour in — reaches stderr, which a packaged Windows application has
+      // no console for; dropping the listener at readiness would leave those
+      // failures with nowhere to be seen.
+      spawned.stdout.onData(forward)
+      spawned.stderr.onData(forward)
+      // Buffering is startup-only: it exists to attach recent output to a
+      // start that failed, not to accumulate a running Host's whole history.
+      startupCleanups.push(spawned.stdout.onData(buffer))
+      startupCleanups.push(spawned.stderr.onData(buffer))
 
       // Polling starts immediately: a Host that is already serving when the
       // first attempt lands needs no further wait.

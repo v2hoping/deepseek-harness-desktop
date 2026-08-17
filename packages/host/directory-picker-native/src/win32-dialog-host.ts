@@ -22,7 +22,11 @@ import type { Win32DialogWorkerData } from './win32-dialog-worker.ts'
  */
 export function spawnDialogWorker(data: Win32DialogWorkerData): ReturnType<typeof spawn> {
   const env = { ...process.env, DSH_DIALOG_TITLE: data.title }
-  const stdio: StdioOptions = ['ignore', 'inherit', 'inherit', 'ipc']
+  // stderr is captured rather than inherited: a child that dies before its
+  // first IPC message — a missing native binding, a runtime that refused to
+  // start — reports only there, and an inherited stream leaves that reason in
+  // a console a packaged application does not have.
+  const stdio: StdioOptions = ['ignore', 'inherit', 'pipe', 'ipc']
   /* v8 ignore next 3 -- the built-output arm: tests always run unbuilt (src/) */
   if (!import.meta.url.endsWith('.ts')) {
     return spawn(process.execPath, [fileURLToPath(new URL('./worker.cjs', import.meta.url))], { env, stdio, windowsHide: true })

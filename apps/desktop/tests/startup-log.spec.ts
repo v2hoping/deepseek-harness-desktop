@@ -66,6 +66,20 @@ describe('desktop startup log', () => {
     })
   })
 
+  it('stops writing once one launch exhausts its budget', async () => {
+    await withDir(async (dir) => {
+      const log = createStartupLog(dir)
+      // The Host forwards output for as long as it runs, so a launch has to
+      // bound its own writing rather than only discard an oversized old file.
+      log.step('x'.repeat(300 * 1024))
+      log.step('after the cap')
+
+      const text = await readFile(log.path, 'utf8')
+      expect(text).toContain('log truncated')
+      expect(text).not.toContain('after the cap')
+    })
+  })
+
   it('drops lines instead of throwing when the log cannot be written', async () => {
     await withDir(async (dir) => {
       // A file where the directory is expected: every write fails, and the

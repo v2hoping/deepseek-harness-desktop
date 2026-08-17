@@ -136,9 +136,11 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/master/apps/desktop/scripts/install.sh | bash
           ```
 
-          **Windows (x64)** — the `.exe` is portable: run it, no installation.
-          It is unsigned, so SmartScreen asks once; choose **More info → Run
-          anyway**.
+          **Windows (x64)** — run the `-Setup.exe` installer. It installs for
+          the current user (no administrator prompt), creates Start menu and
+          desktop shortcuts, and starts the application when it finishes. The
+          installer is unsigned, so SmartScreen asks once; choose **More info →
+          Run anyway**.
 
           ## Notes
 
