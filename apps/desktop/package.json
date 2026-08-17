@@ -50,7 +50,13 @@
       },
       {
         "from": "runtime-host/node_modules",
-        "to": "host/node_modules"
+        "to": "host/node_modules",
+        "filter": [
+          "**/*",
+          "!**/*.d.ts",
+          "!**/*.map",
+          "!**/*.md"
+        ]
       },
       {
         "from": "plugins/account",

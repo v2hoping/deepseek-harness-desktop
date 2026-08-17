@@ -47,6 +47,29 @@ export class DirectoryBrowseError extends Error {
   }
 }
 
+/** A surrounding shell's own directory chooser, when the page runs inside one. */
+interface ShellDirectories {
+  /**
+   * Open the shell's directory chooser.
+   * @returns the selected absolute path, or null when the user cancelled.
+   */
+  pick(): Promise<string | null>
+}
+
+/**
+ * The shell's chooser, read per call rather than captured.
+ *
+ * Structural, not a dependency on any shell package: a browser tab has no such
+ * object and falls through to the Host, which is what keeps `dsh web`
+ * identical wherever it runs.
+ * @returns the chooser, or `undefined` outside a shell that offers one.
+ */
+function shellDirectories(): ShellDirectories | undefined {
+  const shell = (globalThis as { window?: { dshDesktop?: { directories?: ShellDirectories } } })
+    .window?.dshDesktop?.directories
+  return typeof shell?.pick === 'function' ? shell : undefined
+}
+
 /** Real Workspace object layer and Host actions. */
 export class WorkspaceRuntime implements IWorkspaces {
   /** UI-facing immutable projection; the manager remains wire truth. */
@@ -203,10 +226,18 @@ export class WorkspaceRuntime implements IWorkspaces {
   }
 
   /**
-   * Open the Host's native directory picker (the `native` capability).
+   * Open a native directory picker: the surrounding shell's own when the page
+   * runs inside one, and otherwise the Host's `native` capability.
+   *
+   * A shell that already owns a chooser opens it with a call it has in
+   * process. Reaching the Host instead costs a wire round trip and, for its
+   * native capability, a child process that loads a native binding before any
+   * dialog appears — startup a shell does not have to pay.
    * @returns the selected path, or null when the user cancelled.
    */
   async pickDirectory(): Promise<string | null> {
+    const shell = shellDirectories()
+    if (shell !== undefined) return await shell.pick()
     const response = await this.api.host.pickDirectory({})
     if (!response.result.ok) {
       throw new Error(`directory picker failed: ${response.result.error.message}`)

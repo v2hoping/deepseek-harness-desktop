@@ -328,6 +328,41 @@ describe('WorkspaceRuntime', () => {
     await expect(workspaces.pickDirectory()).rejects.toThrow(/no chooser/)
   })
 
+  it('prefers the surrounding shell\'s chooser over the Host round trip', async () => {
+    const ctx = new Context()
+    const api = new FakeApiClient()
+    const workspaces = new WorkspaceRuntime(ctx, api, new SessionRuntime(ctx, api, fakeRemote()))
+    const pick = vi.fn(() => Promise.resolve('/w/from-shell'))
+    // The Host would answer too, so reaching it at all is the regression: its
+    // native capability starts a child process before any dialog appears.
+    api.onPickDirectory = () => Promise.resolve(ok({ path: '/w/from-host' }))
+    vi.stubGlobal('window', { dshDesktop: { directories: { pick } } })
+
+    try {
+      await expect(workspaces.pickDirectory()).resolves.toBe('/w/from-shell')
+      expect(pick).toHaveBeenCalledOnce()
+      expect(api.callsOf('host.pickDirectory')).toEqual([])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('falls through to the Host when the shell offers no chooser', async () => {
+    const ctx = new Context()
+    const api = new FakeApiClient()
+    const workspaces = new WorkspaceRuntime(ctx, api, new SessionRuntime(ctx, api, fakeRemote()))
+    api.onPickDirectory = () => Promise.resolve(ok({ path: '/w/from-host' }))
+
+    // An ordinary browser tab, and a shell exposing an unrelated bridge.
+    vi.stubGlobal('window', { dshDesktop: { account: {} } })
+    try {
+      await expect(workspaces.pickDirectory()).resolves.toBe('/w/from-host')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(api.callsOf('host.pickDirectory')).toEqual([{}])
+  })
+
   it('passes listings and creation through the browse wire, wrapping business failures', async () => {
     const ctx = new Context()
     const api = new FakeApiClient()

@@ -17,6 +17,7 @@ import {
 } from 'electron'
 import { ensureAccountPlugin } from './account/ensure-plugin.ts'
 import { registerAccountIpc } from './account/ipc.ts'
+import { registerDirectoryIpc } from './directory-picker/ipc.ts'
 import { createHostSupervisor, spawnDshWeb, type HostSupervisor } from './host-supervisor.ts'
 import { LOOPBACK_HOST, probeLoopbackOrigin, reserveLoopbackPort } from './loopback.ts'
 import { splashUrl } from './splash.ts'
@@ -275,6 +276,7 @@ async function boot(): Promise<void> {
   // splash page below.
   hardenSession()
   registerAccountIpc()
+  registerDirectoryIpc()
   lifecycle = createDesktopLifecycle({
     getWindow: () => mainWindow,
     createWindow: createMainWindow,

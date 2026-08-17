@@ -15,6 +15,7 @@ interface DesktopPackage {
     readonly extraResources: readonly {
       readonly from: string
       readonly to: string
+      readonly filter?: readonly string[]
     }[]
     readonly mac: { readonly icon: string; readonly target: readonly string[] }
     readonly win: {
@@ -62,9 +63,17 @@ describe('desktop packaging configuration', () => {
   it('maps the staged Host node_modules directory as the copy root', () => {
     expect(desktopPackage.build.extraResources).toEqual(expect.arrayContaining([
       { from: 'runtime-host/package.json', to: 'host/package.json' },
-      { from: 'runtime-host/node_modules', to: 'host/node_modules' },
+      expect.objectContaining({ from: 'runtime-host/node_modules', to: 'host/node_modules' }),
     ]))
     expect(desktopPackage.build.afterPack).toBe('./scripts/verify-packaged-runtime.ts')
+  })
+
+  it('ships the Host closure without its type declarations, sourcemaps, or prose', () => {
+    const hostTree = desktopPackage.build.extraResources
+      .find(entry => entry.to === 'host/node_modules')
+    // Roughly half the staged files are these, and Windows pays for every one
+    // of them at install time through on-access scanning.
+    expect(hostTree?.filter).toEqual(['**/*', '!**/*.d.ts', '!**/*.map', '!**/*.md'])
   })
 
   it('renders every icon from the client fish mark and shares one source across platforms', () => {
