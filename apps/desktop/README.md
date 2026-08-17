@@ -27,7 +27,7 @@ pnpm run package:desktop   # apps/desktop/dist/<platform>/DeepSeek Harness.app
 pnpm run dist:desktop      # apps/desktop/dist/DeepSeek-Harness-<version>-<arch>.dmg
 ```
 
-Packaged applications run the staged `@deepseek-ai/dsh` CLI in a separate process through Electron's Node mode. The application therefore retains the supervised-Host lifecycle without shipping a second Node executable. An `afterPack` check rejects the package when the staged CLI entry or Web frontend entry is absent.
+Packaged applications run the staged `@deepseek-ai/dsh` CLI in a separate process through Electron's Node mode. The application therefore retains the supervised-Host lifecycle without shipping a second Node executable. The staged closure ships as one `host.asar` archive read through Electron's patched `fs`, with `dlopen`ed and spawned binaries unpacked beside it, so a launch opens one file instead of thousands — on Windows, that is the difference between one on-access virus scan and one per module. Bare plugin names reach into the archive through `host-resolver.mjs`, a `--import` hook loaded by the spawned Host, since nothing can symlink into an archive. An `afterPack` check rejects the package when the archived CLI entry, the Web frontend entry, the resolver, or the unpacked natives are absent.
 
 Both macOS and Windows use the exact tracked `apps/desktop/build/icon.png` source; the repository does not commit platform-specific icon variants. That icon and the two tray templates render from `apps/web/public/favicon.svg`, the fish mark the sidebar and browser tab already show, so one shape identifies the product everywhere:
 

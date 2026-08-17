@@ -60,20 +60,20 @@ describe('desktop packaging configuration', () => {
     expect(workspaceConfiguration).toContain('- apps/desktop/runtime')
   })
 
-  it('maps the staged Host node_modules directory as the copy root', () => {
+  it('ships the Host closure as one archive with its binaries beside it', () => {
+    // The archive is what makes startup pay for one file open instead of
+    // thousands; the resolver beside it is what makes bare plugin names reach
+    // inside, since nothing can symlink into an archive.
     expect(desktopPackage.build.extraResources).toEqual(expect.arrayContaining([
-      { from: 'runtime-host/package.json', to: 'host/package.json' },
-      expect.objectContaining({ from: 'runtime-host/node_modules', to: 'host/node_modules' }),
+      { from: 'runtime-host.asar', to: 'host.asar' },
+      { from: 'lib/host-resolver.mjs', to: 'host-resolver.mjs' },
     ]))
+    // The unpacked natives are copied by afterPack, not extraResources:
+    // Electron Builder silently drops mappings whose names involve
+    // `*.asar.unpacked`, which is the one sibling name Electron requires.
+    expect(desktopPackage.build.extraResources.map(entry => entry.to))
+      .not.toContain('host/node_modules')
     expect(desktopPackage.build.afterPack).toBe('./scripts/verify-packaged-runtime.ts')
-  })
-
-  it('ships the Host closure without its type declarations, sourcemaps, or prose', () => {
-    const hostTree = desktopPackage.build.extraResources
-      .find(entry => entry.to === 'host/node_modules')
-    // Roughly half the staged files are these, and Windows pays for every one
-    // of them at install time through on-access scanning.
-    expect(hostTree?.filter).toEqual(['**/*', '!**/*.d.ts', '!**/*.map', '!**/*.md'])
   })
 
   it('renders every icon from the client fish mark and shares one source across platforms', () => {

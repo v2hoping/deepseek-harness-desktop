@@ -254,6 +254,12 @@ export interface SpawnDshWebOptions {
    * origin before the Host is up in order to probe it.
    */
   readonly port: number
+  /**
+   * `--import` specifier (a `file:` URL) loaded before the CLI entry. The
+   * packaged launch passes its archive resolver here; a development launch
+   * passes nothing and resolves from the checkout as before.
+   */
+  readonly importScript?: string
 }
 
 function streamAdapter(stream: NodeJS.ReadableStream): HostChild['stdout'] {
@@ -279,7 +285,9 @@ export function spawnDshWeb(options: SpawnDshWebOptions): HostChild {
   // own --patch has to precede the web app's flags.
   const overlays = options.patches.flatMap(patch => ['--patch', patch])
   const args = [
-    '--expose-internals', options.cliEntry, 'web', ...overlays,
+    '--expose-internals',
+    ...(options.importScript === undefined ? [] : ['--import', options.importScript]),
+    options.cliEntry, 'web', ...overlays,
     '--host', LOOPBACK_HOST, '--port', String(options.port),
   ]
   const child = spawn(options.nodeExecutable, args, {

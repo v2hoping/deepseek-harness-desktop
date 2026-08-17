@@ -221,6 +221,12 @@ function ensureSymlink(link: string, target: string): void {
  * @param home - the Harness home; defaults to {@link resolveDshHome}.
  */
 export function healProfilesModuleFallback(installAnchor: string, home: string = resolveDshHome()): void {
+  // An installation packaged as an asar archive cannot be linked to: paths
+  // inside the archive exist only to Electron's patched fs, never to the
+  // operating system a symlink resolves through. The launcher that ships such
+  // an installation owns bare-specifier resolution instead (dsh-desktop loads
+  // a module-resolution hook into the Host it spawns).
+  if (/\.asar(?:[\\/]|$)/u.test(installAnchor)) return
   const profilesDir = join(home, PROFILES_DIR)
   const modulesDir = join(profilesDir, 'node_modules')
   mkdirSync(modulesDir, { recursive: true })

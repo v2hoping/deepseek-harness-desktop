@@ -2,7 +2,7 @@
 
 import { existsSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   app,
   BrowserWindow,
@@ -52,6 +52,7 @@ function hostPaths(): {
   cwd: string
   electronRunAsNode: boolean
   accountPluginDir: string
+  importScript?: string
 } {
   if (!app.isPackaged) {
     return {
@@ -62,12 +63,17 @@ function hostPaths(): {
       accountPluginDir: join(DESKTOP_DIR, 'plugins/account'),
     }
   }
+  // The packaged installation is one asar archive; the Host reads it through
+  // Electron's patched fs and resolves bare plugin names through the resolver
+  // shipped beside it (as a URL: a Windows drive path is not a valid --import
+  // specifier).
   return {
     nodeExecutable: process.execPath,
-    cliEntry: join(process.resourcesPath, 'host/node_modules/@deepseek-ai/dsh/lib/bin.js'),
+    cliEntry: join(process.resourcesPath, 'host.asar/node_modules/@deepseek-ai/dsh/lib/bin.js'),
     cwd: app.getPath('home'),
     electronRunAsNode: true,
     accountPluginDir: join(process.resourcesPath, 'account-plugin'),
+    importScript: pathToFileURL(join(process.resourcesPath, 'host-resolver.mjs')).href,
   }
 }
 
