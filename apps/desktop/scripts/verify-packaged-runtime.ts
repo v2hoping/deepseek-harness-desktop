@@ -12,10 +12,16 @@ import type { AfterPackContext } from 'electron-builder'
  */
 const WINDOWS_MAX_PATH = 260
 
-/** Entrypoints that must exist inside the Host archive. */
+/**
+ * Entrypoints that must exist inside the Host archive, as path segments.
+ *
+ * The archive is searched by splitting the member path on `path.sep`, so a
+ * path written with embedded separators reads as one directory name on Windows
+ * and never resolves. Joining segments at the lookup keeps the separator native.
+ */
 const REQUIRED_ARCHIVED_FILES = [
-  'node_modules/@deepseek-ai/dsh/lib/bin.js',
-  'node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html',
+  ['node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'],
+  ['node_modules', '@deepseek-ai', 'dsh-web-frontend', 'dist', 'index.html'],
 ] as const
 
 // The account plugin's lib/ is build output the repository does not track, so
@@ -46,9 +52,9 @@ export async function afterPack(context: AfterPackContext): Promise<void> {
   await rm(`${archive}.unpacked`, { recursive: true, force: true })
   await cp(stagedNatives, `${archive}.unpacked`, { recursive: true })
   await access(archive)
-  for (const file of REQUIRED_ARCHIVED_FILES) {
+  for (const segments of REQUIRED_ARCHIVED_FILES) {
     // statFile throws when the archive lacks the member.
-    statFile(archive, file, false)
+    statFile(archive, join(...segments), false)
   }
   for (const segments of REQUIRED_RESOURCES) {
     await access(join(resources, ...segments))

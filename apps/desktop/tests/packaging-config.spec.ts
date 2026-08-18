@@ -204,4 +204,16 @@ describe('cross-platform staging', () => {
         .toContain("shell: process.platform === 'win32'")
     }
   })
+
+  it('looks up archived members with the platform separator', () => {
+    // The archive is searched by splitting the member path on `path.sep`, so a
+    // path carrying embedded separators reads as one directory name on Windows
+    // and reports the Host entry missing from an archive that carries it. Only
+    // Windows sees the difference, which is why this reads the source: a POSIX
+    // run cannot tell the two spellings apart.
+    const source = readFileSync(resolve(desktopRoot, 'scripts/verify-packaged-runtime.ts'), 'utf8')
+
+    expect(source).toContain('statFile(archive, join(...segments), false)')
+    expect(source).not.toMatch(/'node_modules\/[^']*'/u)
+  })
 })
